@@ -1,0 +1,19 @@
+{
+  "name": "notes-app-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for Notes App with TypeScript",
+  "main": "js/app.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "dev": "tsc --watch & live-server --port=3000",
+    "serve": "live-server --port=3000"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "live-server": "^1.2.2"
+  },
+  "dependencies": {
+    "marked": "^9.1.6"
+  }
+}
