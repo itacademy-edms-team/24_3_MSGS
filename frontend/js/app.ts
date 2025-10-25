@@ -182,7 +182,7 @@ class NotesApp {
         });
     }
 
-    private async loadNote(noteId: number): void {
+    private async loadNote(noteId: number): Promise<void> {
         const note = this.notes.find(n => n.id === noteId);
         if (!note) return;
 
@@ -207,7 +207,7 @@ class NotesApp {
         // Update active note in list
         document.querySelectorAll('#notes-list li').forEach(li => {
             li.classList.remove('active');
-            if (li.dataset.noteId === this.currentNote!.id.toString()) {
+            if ((li as HTMLElement).dataset.noteId === this.currentNote!.id.toString()) {
                 li.classList.add('active');
             }
         });
