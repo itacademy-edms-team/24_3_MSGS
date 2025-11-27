@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding.Validation;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace NotesApp.API.Models
 {
@@ -24,12 +26,21 @@ namespace NotesApp.API.Models
         
         // Навигационные свойства
         [ForeignKey("UserId")]
-        public User User { get; set; } = null!;
+        [JsonIgnore]
+        [ValidateNever]
+        public User? User { get; set; }
         
         [ForeignKey("FolderId")]
+        [JsonIgnore]
+        [ValidateNever]
         public Folder? Folder { get; set; }
         
+        [JsonIgnore]
+        [ValidateNever]
         public ICollection<NoteShare> Shares { get; set; } = new List<NoteShare>();
+        
+        [JsonIgnore]
+        [ValidateNever]
         public ICollection<Message> Messages { get; set; } = new List<Message>();
     }
 }

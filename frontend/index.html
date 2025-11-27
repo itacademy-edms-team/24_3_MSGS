@@ -1,107 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Notes App - Markdown Editor</title>
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-</head>
-<body>
-    <div class="app">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <h1>📝 Notes</h1>
-                <button id="new-note-btn" class="btn btn-primary">+ Новая заметка</button>
-            </div>
-            
-            <div class="search-box">
-                <input type="text" id="search-input" placeholder="Поиск заметок...">
-            </div>
-            
-            <div class="folders">
-                <h3>Папки</h3>
-                <ul id="folders-list">
-                    <!-- Папки будут загружены динамически -->
-                </ul>
-            </div>
-            
-            <div class="notes-list">
-                <h3>Заметки</h3>
-                <ul id="notes-list">
-                    <!-- Заметки будут загружены динамически -->
-                </ul>
-            </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <div class="editor-container">
-                <div class="editor-header">
-                    <input type="text" id="note-title" placeholder="Название заметки..." class="note-title-input">
-                    <div class="editor-actions">
-                        <button id="save-btn" class="btn btn-success">💾 Сохранить</button>
-                        <button id="share-btn" class="btn btn-info">🔗 Поделиться</button>
-                        <button id="export-btn" class="btn btn-secondary">📤 Экспорт</button>
-                    </div>
-                </div>
-                
-                <div class="editor-panels">
-                    <div class="editor-panel">
-                        <div class="panel-header">
-                            <h3>Редактор Markdown</h3>
-                            <div class="editor-tools">
-                                <button class="tool-btn" data-action="bold">B</button>
-                                <button class="tool-btn" data-action="italic">I</button>
-                                <button class="tool-btn" data-action="link">🔗</button>
-                                <button class="tool-btn" data-action="code">`</button>
-                            </div>
-                        </div>
-                        <textarea id="markdown-editor" placeholder="Начните писать заметку в формате Markdown..."></textarea>
-                    </div>
-                    
-                    <div class="preview-panel">
-                        <div class="panel-header">
-                            <h3>Предпросмотр</h3>
-                            <div class="preview-tools">
-                                <button id="toggle-preview" class="btn btn-sm">👁️ Скрыть</button>
-                            </div>
-                        </div>
-                        <div id="markdown-preview" class="markdown-content"></div>
-                    </div>
-                </div>
-            </div>
-        </main>
-
-        <!-- Chat Panel (скрыт по умолчанию) -->
-        <aside class="chat-panel" id="chat-panel">
-            <div class="chat-header">
-                <h3>💬 Чат</h3>
-                <button id="close-chat" class="btn btn-sm">✕</button>
-            </div>
-            <div class="chat-messages" id="chat-messages">
-                <!-- Сообщения чата -->
-            </div>
-            <div class="chat-input">
-                <input type="text" id="chat-input" placeholder="Напишите сообщение...">
-                <button id="send-message" class="btn btn-primary">Отправить</button>
-            </div>
-        </aside>
-    </div>
-
-    <!-- Loading indicator -->
-    <div id="loading" class="loading hidden">
-        <div class="spinner"></div>
-        <p>Загрузка...</p>
-    </div>
-
-    <!-- Toast notifications -->
-    <div id="toast-container" class="toast-container"></div>
-
-    <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="js/app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notes App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
+
