@@ -1,10 +1,13 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NotesApp.API.Data;
 using NotesApp.API.Models;
+using System.Security.Claims;
 
 namespace NotesApp.API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class NotesController : ControllerBase
@@ -20,9 +23,11 @@ namespace NotesApp.API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Note>>> GetNotes()
         {
+            var userId = GetCurrentUserId();
             return await _context.Notes
                 .Include(n => n.User)
                 .Include(n => n.Folder)
+                .Where(n => n.UserId == userId)
                 .ToListAsync();
         }
 
@@ -30,11 +35,12 @@ namespace NotesApp.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Note>> GetNote(int id)
         {
+            var userId = GetCurrentUserId();
             var note = await _context.Notes
                 .Include(n => n.User)
                 .Include(n => n.Folder)
                 .Include(n => n.Shares)
-                .FirstOrDefaultAsync(n => n.Id == id);
+                .FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
 
             if (note == null)
             {
@@ -48,18 +54,12 @@ namespace NotesApp.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Note>> PostNote(CreateNoteDto createNoteDto)
         {
-            // Проверяем, существует ли пользователь
-            var user = await _context.Users.FindAsync(createNoteDto.UserId);
-            if (user == null)
-            {
-                return BadRequest($"User with ID {createNoteDto.UserId} not found");
-            }
-
+            var userId = GetCurrentUserId();
             var note = new Note
             {
                 Title = createNoteDto.Title,
                 Content = createNoteDto.Content,
-                UserId = createNoteDto.UserId,
+                UserId = userId,
                 FolderId = createNoteDto.FolderId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -80,8 +80,17 @@ namespace NotesApp.API.Controllers
                 return BadRequest();
             }
 
-            note.UpdatedAt = DateTime.UtcNow;
-            _context.Entry(note).State = EntityState.Modified;
+            var userId = GetCurrentUserId();
+            var existingNote = await _context.Notes.FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
+            if (existingNote == null)
+            {
+                return NotFound();
+            }
+
+            existingNote.Title = note.Title;
+            existingNote.Content = note.Content;
+            existingNote.FolderId = note.FolderId;
+            existingNote.UpdatedAt = DateTime.UtcNow;
 
             try
             {
@@ -106,7 +115,8 @@ namespace NotesApp.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteNote(int id)
         {
-            var note = await _context.Notes.FindAsync(id);
+            var userId = GetCurrentUserId();
+            var note = await _context.Notes.FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
             if (note == null)
             {
                 return NotFound();
@@ -121,6 +131,17 @@ namespace NotesApp.API.Controllers
         private bool NoteExists(int id)
         {
             return _context.Notes.Any(e => e.Id == id);
+        }
+
+        private int GetCurrentUserId()
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdClaim))
+            {
+                throw new UnauthorizedAccessException("Не удалось определить пользователя");
+            }
+
+            return int.Parse(userIdClaim);
         }
     }
 }
