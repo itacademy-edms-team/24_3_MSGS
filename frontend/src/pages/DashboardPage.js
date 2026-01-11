@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "../auth/AuthContext";
@@ -9,6 +9,7 @@ const emptyEditor = { title: "", content: "" };
 export default function DashboardPage() {
     const { user, token, logout } = useAuth();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [folders, setFolders] = useState([]);
     const [notes, setNotes] = useState([]);
     const [selectedFolderId, setSelectedFolderId] = useState(null);
@@ -73,6 +74,22 @@ export default function DashboardPage() {
             .catch(handleError)
             .finally(() => setLoading(false));
     }, [loadFolders, loadNotes, handleError]);
+    // Обработка параметра noteId из URL
+    useEffect(() => {
+        const noteIdParam = searchParams.get("noteId");
+        if (noteIdParam && notes.length > 0) {
+            const noteId = parseInt(noteIdParam, 10);
+            if (!isNaN(noteId)) {
+                const note = notes.find((n) => n.id === noteId);
+                if (note) {
+                    setSelectedNoteId(noteId);
+                    setEditor({ title: note.title, content: note.content });
+                    // Убираем параметр из URL после открытия заметки
+                    setSearchParams({});
+                }
+            }
+        }
+    }, [notes, searchParams, setSearchParams]);
     useEffect(() => {
         if (selectedNote) {
             setEditor({ title: selectedNote.title, content: selectedNote.content });

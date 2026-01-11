@@ -270,8 +270,8 @@ export default function ChatPage() {
       </aside>
 
       <div style={{ display: "grid", gridTemplateColumns: selectedNote ? "1fr 400px" : "1fr", height: "100vh" }}>
-        <section className="editor-panel" style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-          {selectedConversation ? (
+      <section className="editor-panel" style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        {selectedConversation ? (
           <>
             <header className="panel-header">
               <h2>{getOtherUser(selectedConversation)}</h2>
@@ -339,73 +339,98 @@ export default function ChatPage() {
             )}
 
             <div style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  style={{
-                    marginBottom: "1rem",
-                    display: "flex",
-                    flexDirection: message.userId === user?.id ? "row-reverse" : "row",
-                    gap: "0.5rem"
-                  }}
-                >
+              {messages.map((message) => {
+                const handleNoteClick = async () => {
+                  if (!token || !message.noteId) {
+                    console.log("Нет token или noteId", { token: !!token, noteId: message.noteId });
+                    return;
+                  }
+                  console.log("=== КЛИК ПО ЗАМЕТКЕ ===", message.noteId, message);
+                  setLoadingNote(true);
+                  try {
+                    const note = await api.getNote(token, message.noteId);
+                    console.log("Заметка загружена", note);
+                    setSelectedNote(note);
+                  } catch (error) {
+                    console.error("Ошибка загрузки заметки", error);
+                    showStatus(
+                      error instanceof Error ? error.message : "Ошибка загрузки заметки",
+                      6000
+                    );
+                  } finally {
+                    setLoadingNote(false);
+                  }
+                };
+
+                return (
                   <div
+                    key={message.id}
                     style={{
-                      maxWidth: "70%",
-                      padding: "0.75rem 1rem",
-                      borderRadius: "12px",
-                      background: message.userId === user?.id ? "#4c3df7" : "#e5e7eb",
-                      color: message.userId === user?.id ? "#fff" : "#101828"
+                      marginBottom: "1rem",
+                      display: "flex",
+                      flexDirection: message.userId === user?.id ? "row-reverse" : "row",
+                      gap: "0.5rem"
                     }}
                   >
-                    <p style={{ margin: 0, fontSize: "0.85rem", opacity: 0.8, marginBottom: "0.25rem" }}>
-                      {message.username}
-                    </p>
-                    <p style={{ margin: 0 }}>{message.content}</p>
-                    {message.noteId && (
-                      <div
-                        onClick={async () => {
-                          if (!token || !message.noteId) return;
-                          setLoadingNote(true);
-                          try {
-                            const note = await api.getNote(token, message.noteId);
-                            setSelectedNote(note);
-                          } catch (error) {
-                            showStatus(
-                              error instanceof Error ? error.message : "Ошибка загрузки заметки",
-                              6000
-                            );
-                          } finally {
-                            setLoadingNote(false);
-                          }
-                        }}
-                        style={{
-                          margin: "0.5rem 0 0 0",
-                          fontSize: "0.85rem",
-                          opacity: 0.9,
-                          cursor: "pointer",
-                          padding: "0.5rem",
-                          borderRadius: "6px",
-                          background: message.userId === user?.id ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.05)",
-                          transition: "background 0.2s",
-                          display: "inline-block"
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = message.userId === user?.id ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.1)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = message.userId === user?.id ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.05)";
-                        }}
-                      >
-                        📎 Заметка #{message.noteId} {loadingNote ? "(загрузка...)" : "(кликните, чтобы открыть)"}
-                      </div>
-                    )}
-                    <p style={{ margin: "0.5rem 0 0 0", fontSize: "0.75rem", opacity: 0.7 }}>
-                      {new Date(message.sentAt).toLocaleTimeString()}
-                    </p>
+                    <div
+                      onClick={message.noteId ? (e) => {
+                        e.stopPropagation();
+                        handleNoteClick();
+                      } : undefined}
+                      style={{
+                        maxWidth: "70%",
+                        padding: "0.75rem 1rem",
+                        borderRadius: "12px",
+                        background: message.userId === user?.id ? "#4c3df7" : "#e5e7eb",
+                        color: message.userId === user?.id ? "#fff" : "#101828",
+                        cursor: message.noteId ? "pointer" : "default",
+                        transition: message.noteId ? "all 0.2s" : "none",
+                        position: "relative"
+                      }}
+                      onMouseEnter={message.noteId ? (e) => {
+                        e.currentTarget.style.opacity = "0.9";
+                        e.currentTarget.style.transform = "scale(1.02)";
+                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+                        e.currentTarget.style.border = message.userId === user?.id ? "2px solid rgba(255,255,255,0.5)" : "2px solid rgba(76, 61, 247, 0.5)";
+                      } : undefined}
+                      onMouseLeave={message.noteId ? (e) => {
+                        e.currentTarget.style.opacity = "1";
+                        e.currentTarget.style.transform = "scale(1)";
+                        e.currentTarget.style.boxShadow = "none";
+                        e.currentTarget.style.border = "none";
+                      } : undefined}
+                    >
+                      <p style={{ margin: 0, fontSize: "0.85rem", opacity: 0.8, marginBottom: "0.25rem" }}>
+                        {message.username}
+                      </p>
+                      <p style={{ margin: 0 }}>{message.content}</p>
+                      {message.noteId && (
+                        <div
+                          style={{
+                            margin: "0.5rem 0 0 0",
+                            fontSize: "0.85rem",
+                            padding: "0.5rem",
+                            borderRadius: "6px",
+                            background: message.userId === user?.id ? "rgba(255,255,255,0.2)" : "rgba(76, 61, 247, 0.15)",
+                            border: message.userId === user?.id ? "1px solid rgba(255,255,255,0.3)" : "1px solid rgba(76, 61, 247, 0.3)",
+                            display: "inline-block"
+                          }}
+                        >
+                          <strong>📎 Заметка #{message.noteId}</strong>
+                          {loadingNote ? (
+                            <span style={{ marginLeft: "0.5rem" }}>(загрузка...)</span>
+                          ) : (
+                            <span style={{ marginLeft: "0.5rem", fontSize: "0.8rem" }}>— кликните, чтобы открыть</span>
+                          )}
+                        </div>
+                      )}
+                      <p style={{ margin: "0.5rem 0 0 0", fontSize: "0.75rem", opacity: 0.7 }}>
+                        {new Date(message.sentAt).toLocaleTimeString()}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
 

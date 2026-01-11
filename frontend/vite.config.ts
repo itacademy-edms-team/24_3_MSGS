@@ -9,7 +9,13 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port: Number(env.VITE_PORT || 5173),
-      host: "0.0.0.0"
+      host: "0.0.0.0",
+      hmr: {
+        overlay: true
+      },
+      watch: {
+        usePolling: true
+      }
     },
     preview: {
       port: Number(env.VITE_PORT || 4173)

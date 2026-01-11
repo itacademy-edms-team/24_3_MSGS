@@ -36,6 +36,9 @@ export const api = {
     getNotes: (token) => request("/notes", {
         token
     }),
+    getNote: (token, id) => request(`/notes/${id}`, {
+        token
+    }),
     createNote: (token, payload) => request("/notes", {
         method: "POST",
         token,
