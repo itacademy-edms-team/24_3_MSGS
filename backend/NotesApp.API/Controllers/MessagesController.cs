@@ -86,9 +86,10 @@ namespace NotesApp.API.Controllers
                 return Forbid("Нет доступа к этой заметке");
             }
 
+            // Получаем только комментарии к заметке (не сообщения о шаринге в чате)
             var messages = await _context.Messages
                 .Include(m => m.User)
-                .Where(m => m.NoteId == noteId)
+                .Where(m => m.NoteId == noteId && m.ConversationId == null)
                 .OrderBy(m => m.SentAt)
                 .Select(m => new MessageDto
                 {

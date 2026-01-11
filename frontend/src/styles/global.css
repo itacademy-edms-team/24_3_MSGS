@@ -182,6 +182,8 @@ textarea:focus,
   grid-template-columns: 280px 320px 1fr;
   min-height: 100vh;
   background: #f5f7fb;
+  width: 100%;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -395,6 +397,17 @@ textarea:focus,
   .editor-columns {
     grid-template-columns: 1fr;
     height: auto;
+  }
+}
+
+.chat-dashboard {
+  grid-template-columns: 280px 1fr !important;
+}
+
+@media (min-width: 1600px) {
+  .dashboard {
+    max-width: 100%;
+    margin: 0;
   }
 }
 

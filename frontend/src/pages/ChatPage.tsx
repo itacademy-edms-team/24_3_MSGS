@@ -22,6 +22,11 @@ export default function ChatPage() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [loadingNote, setLoadingNote] = useState(false);
+  const [comments, setComments] = useState<Message[]>([]);
+  const [showComments, setShowComments] = useState(false);
+  const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
+  const [commentInput, setCommentInput] = useState("");
+  const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
@@ -191,6 +196,49 @@ export default function ChatPage() {
       : conversation.user1Username;
   };
 
+  const loadComments = useCallback(async (noteId: number) => {
+    if (!token) return;
+    try {
+      const data = await api.getNoteComments(token, noteId);
+      setComments(data);
+    } catch (error) {
+      // Игнорируем ошибки загрузки комментариев
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (selectedNote) {
+      loadComments(selectedNote.id);
+      setSelectedText(null);
+      setCommentInput("");
+      setExpandedComments(new Set());
+    } else {
+      setComments([]);
+    }
+  }, [selectedNote, loadComments]);
+
+  const handleAddComment = async () => {
+    if (!token || !selectedNote || !commentInput.trim()) return;
+    
+    try {
+      await api.sendMessage(token, {
+        content: commentInput.trim(),
+        noteId: selectedNote.id,
+        selectionStart: selectedText?.start ?? null,
+        selectionEnd: selectedText?.end ?? null
+      });
+      setCommentInput("");
+      setSelectedText(null);
+      showStatus("Комментарий добавлен");
+      loadComments(selectedNote.id);
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "Ошибка добавления комментария",
+        6000
+      );
+    }
+  };
+
   if (loading) {
     return (
       <div className="fullscreen-center">
@@ -201,7 +249,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="dashboard">
+    <div className="dashboard chat-dashboard">
       <aside className="sidebar">
         <div className="user-card">
           <div>
@@ -269,8 +317,20 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      <div style={{ display: "grid", gridTemplateColumns: selectedNote ? "1fr 400px" : "1fr", height: "100vh" }}>
-      <section className="editor-panel" style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      <div style={{ 
+        display: "grid", 
+        gridTemplateColumns: selectedNote ? "minmax(350px, 500px) 1fr" : "1fr", 
+        height: "100vh", 
+        gap: "0",
+        width: "100%",
+        overflow: "hidden"
+      }}>
+      <section className="editor-panel" style={{ 
+        display: "flex", 
+        flexDirection: "column", 
+        height: "100vh",
+        overflow: "hidden"
+      }}>
         {selectedConversation ? (
           <>
             <header className="panel-header">
@@ -350,7 +410,9 @@ export default function ChatPage() {
                   try {
                     const note = await api.getNote(token, message.noteId);
                     console.log("Заметка загружена", note);
+                    console.log("Устанавливаем selectedNote:", note);
                     setSelectedNote(note);
+                    console.log("selectedNote установлен");
                   } catch (error) {
                     console.error("Ошибка загрузки заметки", error);
                     showStatus(
@@ -462,21 +524,203 @@ export default function ChatPage() {
         </section>
 
         {selectedNote && (
-          <section style={{ background: "#fff", borderLeft: "1px solid #e5e7eb", display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+          <section style={{ 
+            background: "#fff", 
+            borderLeft: "1px solid #e5e7eb", 
+            display: "flex", 
+            flexDirection: "column", 
+            height: "100vh", 
+            overflow: "hidden",
+            minWidth: 0,
+            width: "100%"
+          }}>
             <header className="panel-header" style={{ padding: "1rem", borderBottom: "1px solid #e5e7eb" }}>
               <h2 style={{ margin: 0 }}>{selectedNote.title || "Без названия"}</h2>
-              <button
-                className="btn ghost"
-                onClick={() => setSelectedNote(null)}
-                style={{ fontSize: "1.5rem", padding: "0.25rem 0.5rem" }}
-              >
-                ×
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <button
+                  className="btn secondary"
+                  onClick={() => setShowComments(!showComments)}
+                  style={{ fontSize: "0.9rem" }}
+                >
+                  {showComments ? "Скрыть" : "Показать"} комментарии ({comments.length})
+                </button>
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    setSelectedNote(null);
+                    setSelectedText(null);
+                    setCommentInput("");
+                  }}
+                  style={{ fontSize: "1.5rem", padding: "0.25rem 0.5rem" }}
+                >
+                  ×
+                </button>
+              </div>
             </header>
-            <div style={{ flex: 1, overflowY: "auto", padding: "1.5rem" }}>
-              <div className="preview">
+            <div style={{ flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }}>
+              <div 
+                className="preview"
+                style={{ maxWidth: "100%", wordWrap: "break-word" }}
+                onMouseUp={(e) => {
+                  const selection = window.getSelection();
+                  if (selection && selection.toString().trim()) {
+                    const range = selection.getRangeAt(0);
+                    const previewElement = e.currentTarget;
+                    const textContent = previewElement.textContent || "";
+                    
+                    // Находим позиции в исходном тексте заметки
+                    const walker = document.createTreeWalker(
+                      previewElement,
+                      NodeFilter.SHOW_TEXT,
+                      null
+                    );
+                    
+                    let charCount = 0;
+                    let start = -1;
+                    let end = -1;
+                    
+                    const rangeStartContainer = range.startContainer;
+                    const rangeEndContainer = range.endContainer;
+                    const rangeStartOffset = range.startOffset;
+                    const rangeEndOffset = range.endOffset;
+                    
+                    let node;
+                    while (node = walker.nextNode()) {
+                      const nodeLength = node.textContent?.length || 0;
+                      
+                      if (node === rangeStartContainer && start === -1) {
+                        start = charCount + rangeStartOffset;
+                      }
+                      if (node === rangeEndContainer && end === -1) {
+                        end = charCount + rangeEndOffset;
+                        break;
+                      }
+                      
+                      charCount += nodeLength;
+                    }
+                    
+                    if (start !== -1 && end !== -1 && start !== end) {
+                      // Находим соответствующие позиции в исходном Markdown
+                      const markdownText = selectedNote.content;
+                      setSelectedText({ start, end });
+                    } else {
+                      setSelectedText(null);
+                    }
+                  } else {
+                    setSelectedText(null);
+                  }
+                }}
+              >
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedNote.content}</ReactMarkdown>
               </div>
+              
+              <div style={{ 
+                position: "sticky", 
+                bottom: 0, 
+                padding: "0.75rem", 
+                background: selectedText ? "#eef2ff" : "#fff", 
+                borderTop: "1px solid #e5e7eb",
+                marginTop: "1rem"
+              }}>
+                {selectedText && (
+                  <p style={{ margin: "0 0 0.5rem 0", fontSize: "0.85rem", fontWeight: 600 }}>
+                    Выделен текст: "{selectedNote.content.substring(selectedText.start, selectedText.end).substring(0, 50)}..."
+                  </p>
+                )}
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="text"
+                    value={commentInput}
+                    onChange={(e) => setCommentInput(e.target.value)}
+                    placeholder={selectedText ? "Добавить комментарий к выделенному тексту..." : "Добавить комментарий к заметке..."}
+                    style={{ flex: 1, padding: "0.5rem", borderRadius: "6px", border: "1px solid #e5e7eb" }}
+                    onKeyPress={(e) => {
+                      if (e.key === "Enter" && commentInput.trim()) {
+                        handleAddComment();
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn primary"
+                    onClick={handleAddComment}
+                    disabled={!commentInput.trim() || !token}
+                  >
+                    Отправить
+                  </button>
+                  {selectedText && (
+                    <button
+                      className="btn ghost"
+                      onClick={() => {
+                        setSelectedText(null);
+                        setCommentInput("");
+                      }}
+                    >
+                      Отмена
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {showComments && comments.length > 0 && (
+                <div style={{ marginTop: "2rem", paddingTop: "1.5rem", borderTop: "2px solid #e5e7eb" }}>
+                  <h3 style={{ marginBottom: "1rem", fontSize: "1.1rem" }}>Комментарии ({comments.length})</h3>
+                  {comments.map((comment) => {
+                    const isExpanded = expandedComments.has(comment.id);
+                    const hasSelection = comment.selectionStart != null && comment.selectionEnd != null;
+                    const selectedText = hasSelection
+                      ? selectedNote.content.substring(comment.selectionStart!, comment.selectionEnd!)
+                      : null;
+
+                    return (
+                      <div
+                        key={comment.id}
+                        style={{
+                          marginBottom: "1rem",
+                          padding: "0.75rem",
+                          background: "#f9fafb",
+                          borderRadius: "8px",
+                          border: "1px solid #e5e7eb"
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "0.5rem" }}>
+                          <div>
+                            <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 600 }}>{comment.username}</p>
+                            <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.75rem", color: "#6b7280" }}>
+                              {new Date(comment.sentAt).toLocaleString()}
+                            </p>
+                          </div>
+                          {hasSelection && (
+                            <button
+                              className="btn ghost"
+                              onClick={() => {
+                                const newExpanded = new Set(expandedComments);
+                                if (isExpanded) {
+                                  newExpanded.delete(comment.id);
+                                } else {
+                                  newExpanded.add(comment.id);
+                                }
+                                setExpandedComments(newExpanded);
+                              }}
+                              style={{ fontSize: "0.75rem", padding: "0.25rem 0.5rem" }}
+                            >
+                              {isExpanded ? "Свернуть" : "Развернуть"}
+                            </button>
+                          )}
+                        </div>
+                        {hasSelection && isExpanded && selectedText && (
+                          <div style={{ marginBottom: "0.5rem", padding: "0.5rem", background: "#fff", borderRadius: "4px", border: "1px solid #e5e7eb" }}>
+                            <p style={{ margin: 0, fontSize: "0.75rem", color: "#6b7280", marginBottom: "0.25rem" }}>
+                              Комментарий к тексту:
+                            </p>
+                            <p style={{ margin: 0, fontStyle: "italic", color: "#4c3df7" }}>"{selectedText}"</p>
+                          </div>
+                        )}
+                        <p style={{ margin: 0 }}>{comment.content}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </section>
         )}
