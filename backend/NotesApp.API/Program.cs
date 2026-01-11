@@ -99,6 +99,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// UseHttpsRedirection отключен для разработки, чтобы разрешить HTTP запросы
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.UseAuthentication();

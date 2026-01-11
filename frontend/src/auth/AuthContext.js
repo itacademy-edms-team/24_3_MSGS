@@ -70,6 +70,7 @@ export const AuthProvider = ({ children }) => {
     }), [user, token, loading, error, login, register, logout]);
     return _jsx(AuthContext.Provider, { value: value, children: children });
 };
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
     const ctx = useContext(AuthContext);
     if (!ctx) {

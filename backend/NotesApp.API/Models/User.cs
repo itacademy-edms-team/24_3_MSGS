@@ -27,5 +27,9 @@ namespace NotesApp.API.Models
         public ICollection<Folder> Folders { get; set; } = new List<Folder>();
         public ICollection<NoteShare> SharedNotes { get; set; } = new List<NoteShare>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();
+        public ICollection<Friendship> SentFriendRequests { get; set; } = new List<Friendship>();
+        public ICollection<Friendship> ReceivedFriendRequests { get; set; } = new List<Friendship>();
+        public ICollection<Conversation> ConversationsAsUser1 { get; set; } = new List<Conversation>();
+        public ICollection<Conversation> ConversationsAsUser2 { get; set; } = new List<Conversation>();
     }
 }

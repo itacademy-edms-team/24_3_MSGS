@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from "./auth/AuthContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
+import FriendsPage from "./pages/FriendsPage";
+import ChatPage from "./pages/ChatPage";
 
 const ProtectedRoute = ({ children }: { children: ReactElement }) => {
   const { token, loading } = useAuth();
@@ -33,6 +35,22 @@ const AppRoutes = () => (
       element={
         <ProtectedRoute>
           <DashboardPage />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/friends"
+      element={
+        <ProtectedRoute>
+          <FriendsPage />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/chat"
+      element={
+        <ProtectedRoute>
+          <ChatPage />
         </ProtectedRoute>
       }
     />

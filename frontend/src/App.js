@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from "./auth/AuthContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
+import FriendsPage from "./pages/FriendsPage";
+import ChatPage from "./pages/ChatPage";
 const ProtectedRoute = ({ children }) => {
     const { token, loading } = useAuth();
     if (loading) {
@@ -14,7 +16,7 @@ const ProtectedRoute = ({ children }) => {
     }
     return children;
 };
-const AppRoutes = () => (_jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsx(Route, { path: "/app", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/app", replace: true }) })] }));
+const AppRoutes = () => (_jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsx(Route, { path: "/app", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/friends", element: _jsx(ProtectedRoute, { children: _jsx(FriendsPage, {}) }) }), _jsx(Route, { path: "/chat", element: _jsx(ProtectedRoute, { children: _jsx(ChatPage, {}) }) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/app", replace: true }) })] }));
 export default function App() {
     return (_jsx(AuthProvider, { children: _jsx(BrowserRouter, { children: _jsx(AppRoutes, {}) }) }));
 }

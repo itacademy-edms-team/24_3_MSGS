@@ -40,11 +40,17 @@ namespace NotesApp.API.Controllers
                 .Include(n => n.User)
                 .Include(n => n.Folder)
                 .Include(n => n.Shares)
-                .FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
+                .FirstOrDefaultAsync(n => n.Id == id);
 
             if (note == null)
             {
                 return NotFound();
+            }
+
+            // Проверяем доступ: владелец или имеет доступ через шаринг
+            if (note.UserId != userId && !note.Shares.Any(s => s.UserId == userId))
+            {
+                return Forbid("Нет доступа к этой заметке");
             }
 
             return note;

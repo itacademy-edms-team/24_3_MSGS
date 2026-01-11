@@ -14,13 +14,26 @@ namespace NotesApp.API.Models
         
         // Внешние ключи
         public int UserId { get; set; }
-        public int NoteId { get; set; }
+        
+        // ConversationId - для сообщений в чате между пользователями
+        public int? ConversationId { get; set; }
+        
+        // NoteId - для комментариев к заметкам (опционально)
+        public int? NoteId { get; set; }
+        
+        // Поля для комментариев к конкретной части заметки
+        // Если указаны, то это комментарий к выделенному тексту
+        public int? SelectionStart { get; set; }
+        public int? SelectionEnd { get; set; }
         
         // Навигационные свойства
         [ForeignKey("UserId")]
         public User User { get; set; } = null!;
         
+        [ForeignKey("ConversationId")]
+        public Conversation? Conversation { get; set; }
+        
         [ForeignKey("NoteId")]
-        public Note Note { get; set; } = null!;
+        public Note? Note { get; set; }
     }
 }

@@ -57,3 +57,60 @@ export type CreateFolderPayload = {
 
 export type UpdateFolderPayload = CreateFolderPayload;
 
+export type Friendship = {
+  id: number;
+  requesterId: number;
+  requesterUsername: string;
+  addresseeId: number;
+  addresseeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+  updatedAt: string | null;
+};
+
+export type Conversation = {
+  id: number;
+  user1Id: number;
+  user1Username: string;
+  user2Id: number;
+  user2Username: string;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageId?: number | null;
+  lastMessageContent?: string | null;
+  lastMessageSentAt?: string | null;
+};
+
+export type Message = {
+  id: number;
+  content: string;
+  sentAt: string;
+  userId: number;
+  username: string;
+  conversationId?: number | null;
+  noteId?: number | null;
+  selectionStart?: number | null;
+  selectionEnd?: number | null;
+};
+
+export type SendFriendRequestPayload = {
+  username: string;
+};
+
+export type CreateConversationPayload = {
+  userId: number;
+};
+
+export type CreateMessagePayload = {
+  content: string;
+  conversationId?: number | null;
+  noteId?: number | null;
+  selectionStart?: number | null;
+  selectionEnd?: number | null;
+};
+
+export type ShareNotePayload = {
+  conversationId: number;
+  noteId: number;
+};
+
