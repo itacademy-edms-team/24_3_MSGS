@@ -384,7 +384,7 @@ textarea:focus,
 }
 
 @media (max-width: 1200px) {
-  .dashboard {
+  .dashboard:not(.chat-dashboard) {
     grid-template-columns: 1fr;
   }
 
