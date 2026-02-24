@@ -1,5 +1,7 @@
 // const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5000/api";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "https://localhost:7000/api";
+/** Базовый URL бэкенда без /api — для WebSocket (SignalR) */
+export const HUB_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "") || "https://localhost:7000";
 async function request(path, options = {}) {
     const headers = {
         Accept: "application/json"

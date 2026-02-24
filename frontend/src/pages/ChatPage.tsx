@@ -1,14 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import * as SignalR from "@microsoft/signalr";
 import { useAuth } from "../auth/AuthContext";
-import { api } from "../services/api";
+import { api, HUB_BASE_URL } from "../services/api";
 import type { Conversation, Message, Note, Folder, User } from "../types";
+
+/** Нормализует сообщение с бэкенда (PascalCase или camelCase) в тип Message */
+function normalizeMessage(msg: Record<string, unknown>): Message {
+  return {
+    id: (msg.id ?? msg.Id) as number,
+    content: (msg.content ?? msg.Content) as string,
+    sentAt: (msg.sentAt ?? msg.SentAt) as string,
+    userId: (msg.userId ?? msg.UserId) as number,
+    username: (msg.username ?? msg.Username) as string,
+    conversationId: (msg.conversationId ?? msg.ConversationId) as number | null | undefined,
+    noteId: (msg.noteId ?? msg.NoteId) as number | null | undefined,
+    selectionStart: (msg.selectionStart ?? msg.SelectionStart) as number | null | undefined,
+    selectionEnd: (msg.selectionEnd ?? msg.SelectionEnd) as number | null | undefined
+  };
+}
 
 export default function ChatPage() {
   const { user, token } = useAuth();
-  const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [friends, setFriends] = useState<User[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
@@ -27,7 +42,14 @@ export default function ChatPage() {
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
+  const [hubConnected, setHubConnected] = useState(false);
+  const [hubError, setHubError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const connectionRef = useRef<SignalR.HubConnection | null>(null);
+  const selectedConvRef = useRef<number | null>(null);
+  const prevConversationIdRef = useRef<number | null>(null);
+  const loadConversationsRef = useRef<( () => Promise<void>) | null>(null);
+  selectedConvRef.current = selectedConversationId;
 
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
 
@@ -58,6 +80,7 @@ export default function ChatPage() {
       );
     }
   }, [token]);
+  loadConversationsRef.current = loadConversations;
 
   const loadFriends = useCallback(async () => {
     if (!token) return;
@@ -101,6 +124,114 @@ export default function ChatPage() {
       // Игнорируем ошибки
     }
   }, [token]);
+
+  // Подключение SignalR для обновления чата в реальном времени
+  useEffect(() => {
+    if (!token) return;
+    setHubError(null);
+    const url = `${HUB_BASE_URL}/hubs/chat`;
+    console.log("[SignalR] Подключение к:", url);
+    const connection = new SignalR.HubConnectionBuilder()
+      .withUrl(url, { accessTokenFactory: () => token })
+      .withAutomaticReconnect()
+      .build();
+
+    connection.on("ReceiveMessage", (msg: Record<string, unknown>) => {
+      const normalized = normalizeMessage(msg);
+      const currentConvId = selectedConvRef.current;
+      if (normalized.conversationId !== currentConvId) return;
+      setMessages((prev) =>
+        prev.some((m) => m.id === normalized.id) ? prev : [...prev, normalized]
+      );
+      loadConversationsRef.current?.();
+    });
+
+    const updateConnected = () => {
+      setHubConnected(connection.state === SignalR.HubConnectionState.Connected);
+      if (connection.state === SignalR.HubConnectionState.Disconnected) {
+        setHubError(null); // очищаем при разрыве, чтобы не путать с первой ошибкой
+      }
+    };
+    connection.onclose(updateConnected);
+    connection.onreconnecting(updateConnected);
+    connection.onreconnected(updateConnected);
+
+    // После переподключения снова вступаем в группу текущего чата
+    connection.onreconnected(() => {
+      const convId = selectedConvRef.current;
+      if (convId != null) {
+        connection.invoke("JoinConversation", convId).catch(() => {});
+      }
+    });
+
+    connection
+      .start()
+      .then(() => {
+        setHubConnected(true);
+        setHubError(null);
+        const convId = selectedConvRef.current;
+        if (convId != null) {
+          connection.invoke("JoinConversation", convId).catch((e) =>
+            console.error("JoinConversation failed:", e)
+          );
+        }
+      })
+      .catch((err) => {
+        const message = err?.message ?? String(err);
+        setHubError(message);
+        console.error("[SignalR] Ошибка подключения:", message, "\nURL:", url, "\nПолная ошибка:", err);
+      });
+
+    connectionRef.current = connection;
+    prevConversationIdRef.current = selectedConversationId;
+
+    return () => {
+      connection.off("ReceiveMessage");
+      connection.onclose(() => {});
+      connection.onreconnecting(() => {});
+      connection.onreconnected(() => {});
+      setHubConnected(false);
+      setHubError(null);
+      const leave =
+        prevConversationIdRef.current != null
+          ? connection.invoke("LeaveConversation", prevConversationIdRef.current)
+          : Promise.resolve();
+      leave.finally(() => connection.stop()).catch(() => {});
+      connectionRef.current = null;
+      prevConversationIdRef.current = null;
+    };
+  }, [token]);
+
+  // При смене выбранного чата — переподключаемся к группе SignalR
+  useEffect(() => {
+    const conn = connectionRef.current;
+    if (!conn || conn.state !== SignalR.HubConnectionState.Connected) return;
+    const prevId = prevConversationIdRef.current;
+    if (prevId != null) {
+      conn.invoke("LeaveConversation", prevId).catch(() => {});
+    }
+    if (selectedConversationId != null) {
+      conn.invoke("JoinConversation", selectedConversationId).catch(() => {});
+    }
+    prevConversationIdRef.current = selectedConversationId;
+  }, [selectedConversationId]);
+
+  // Если чат выбран до установки соединения — вступаем в группу, как только подключимся
+  useEffect(() => {
+    if (selectedConversationId == null) return;
+    const conn = connectionRef.current;
+    if (!conn || conn.state === SignalR.HubConnectionState.Connected) return;
+    const id = setInterval(() => {
+      const c = connectionRef.current;
+      if (!c || c.state !== SignalR.HubConnectionState.Connected) return;
+      const convId = selectedConvRef.current;
+      if (convId != null) {
+        c.invoke("JoinConversation", convId).catch(() => {});
+      }
+      clearInterval(id);
+    }, 600);
+    return () => clearInterval(id);
+  }, [selectedConversationId]);
 
   useEffect(() => {
     setLoading(true);
@@ -333,14 +464,43 @@ export default function ChatPage() {
       }}>
         {selectedConversation ? (
           <>
-            <header className="panel-header">
-              <h2>{getOtherUser(selectedConversation)}</h2>
-              <button
+            <header className="panel-header" style={{ flexWrap: "nowrap", minWidth: 0 }}>
+              <h2 style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {getOtherUser(selectedConversation)}
+              </h2>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
+                <span
+                  data-chat-hub-status
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    padding: "0.25rem 0.5rem",
+                    borderRadius: "6px",
+                    background: hubConnected ? "rgba(5, 150, 105, 0.15)" : "rgba(107, 114, 128, 0.15)",
+                    color: hubConnected ? "#059669" : "#6b7280"
+                  }}
+                  title={
+                    hubError
+                      ? `Ошибка: ${hubError}. Откройте консоль (F12) для подробностей.`
+                      : hubConnected
+                        ? "Сообщения приходят в реальном времени"
+                        : "Подключение к серверу чата..."
+                  }
+                >
+                  {hubConnected ? "● Подключено" : "○ Нет подключения"}
+                </span>
+                {hubError && (
+                  <span style={{ fontSize: "0.7rem", color: "#b91c1c", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }} title={hubError}>
+                    {hubError}
+                  </span>
+                )}
+                <button
                 className="btn secondary"
                 onClick={() => setShowShareNotes(!showShareNotes)}
-              >
-                {showShareNotes ? "Скрыть" : "Поделиться файлами"}
-              </button>
+                >
+                  {showShareNotes ? "Скрыть" : "Поделиться файлами"}
+                </button>
+              </div>
             </header>
 
             {showShareNotes && (

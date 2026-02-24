@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using NotesApp.API.Data;
+using NotesApp.API.Hubs;
 using NotesApp.API.Models;
 using NotesApp.API.Models.Messages;
 using System.Security.Claims;
@@ -14,10 +16,12 @@ namespace NotesApp.API.Controllers
     public class MessagesController : ControllerBase
     {
         private readonly NotesDbContext _context;
+        private readonly IHubContext<ChatHub> _hubContext;
 
-        public MessagesController(NotesDbContext context)
+        public MessagesController(NotesDbContext context, IHubContext<ChatHub> hubContext)
         {
             _context = context;
+            _hubContext = hubContext;
         }
 
         // GET: api/messages/conversation/{conversationId} - получить сообщения чата
@@ -183,7 +187,7 @@ namespace NotesApp.API.Controllers
                 .Reference(m => m.User)
                 .LoadAsync();
 
-            return new MessageDto
+            var messageDto = new MessageDto
             {
                 Id = message.Id,
                 Content = message.Content,
@@ -195,6 +199,15 @@ namespace NotesApp.API.Controllers
                 SelectionStart = message.SelectionStart,
                 SelectionEnd = message.SelectionEnd
             };
+
+            if (message.ConversationId.HasValue)
+            {
+                await _hubContext.Clients
+                    .Group($"conversation_{message.ConversationId.Value}")
+                    .SendAsync("ReceiveMessage", messageDto);
+            }
+
+            return messageDto;
         }
 
         // POST: api/messages/share-note - поделиться заметкой через чат
@@ -261,7 +274,7 @@ namespace NotesApp.API.Controllers
                 .Reference(m => m.User)
                 .LoadAsync();
 
-            return new MessageDto
+            var messageDto = new MessageDto
             {
                 Id = message.Id,
                 Content = message.Content,
@@ -271,6 +284,12 @@ namespace NotesApp.API.Controllers
                 ConversationId = message.ConversationId,
                 NoteId = message.NoteId
             };
+
+            await _hubContext.Clients
+                .Group($"conversation_{dto.ConversationId}")
+                .SendAsync("ReceiveMessage", messageDto);
+
+            return messageDto;
         }
 
         private int GetCurrentUserId()

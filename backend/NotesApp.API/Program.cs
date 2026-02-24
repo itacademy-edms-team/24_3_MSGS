@@ -3,9 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using NotesApp.API.Data;
+using NotesApp.API.Hubs;
 using NotesApp.API.Options;
 using NotesApp.API.Services;
 using System.Text;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -71,9 +73,28 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ClockSkew = TimeSpan.FromMinutes(1)
     };
+    // SignalR подключается по WebSocket — токен передаём в query string
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/chat"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
+    };
 });
 
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    });
 
 // Добавляем CORS для фронтенда
 builder.Services.AddCors(options =>
@@ -86,7 +107,8 @@ builder.Services.AddCors(options =>
                 "https://localhost:5173",
                 "http://localhost:8080")
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials(); // нужно для SignalR negotiate (credentials: 'include')
     });
 });
 
@@ -99,12 +121,17 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// UseHttpsRedirection отключен для разработки, чтобы разрешить HTTP запросы
-app.UseHttpsRedirection();
+// UseHttpsRedirection отключаем в разработке: иначе запросы к http:// перенаправляются на https://,
+// что может ломать negotiate SignalR. Для реального времени чата подключайтесь к тому же URL, что и API.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();

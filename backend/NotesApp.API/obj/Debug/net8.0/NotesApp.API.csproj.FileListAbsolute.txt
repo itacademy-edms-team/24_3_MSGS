@@ -15,11 +15,8 @@ C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensi
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Configuration.Abstractions.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.DependencyInjection.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.DependencyInjection.Abstractions.dll
-C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Diagnostics.Abstractions.dll
-C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Hosting.Abstractions.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Logging.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Logging.Abstractions.dll
-C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.ObjectPool.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Options.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Extensions.Primitives.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.IdentityModel.Abstractions.dll
@@ -29,7 +26,6 @@ C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.Identit
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.IdentityModel.Tokens.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Microsoft.OpenApi.dll
-C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Newtonsoft.Json.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Npgsql.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Npgsql.EntityFrameworkCore.PostgreSQL.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Swashbuckle.AspNetCore.Swagger.dll
@@ -37,7 +33,6 @@ C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Swashbuckle.AspNe
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\Swashbuckle.AspNetCore.SwaggerUI.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\System.Diagnostics.DiagnosticSource.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\System.IdentityModel.Tokens.Jwt.dll
-C:\Users\roman\24_3_MSGS\backend\NotesApp.API\bin\Debug\net8.0\System.Net.WebSockets.WebSocketProtocol.dll
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\obj\Debug\net8.0\NotesApp.API.csproj.AssemblyReference.cache
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\obj\Debug\net8.0\NotesApp.API.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\roman\24_3_MSGS\backend\NotesApp.API\obj\Debug\net8.0\NotesApp.API.AssemblyInfoInputs.cache
