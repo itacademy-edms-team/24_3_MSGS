@@ -63,8 +63,61 @@ export default function ChatPage() {
   const loadConversationsRef = useRef<( () => Promise<void>) | null>(null);
   const joinedConversationIdsRef = useRef<Set<number>>(new Set());
   const tokenRef = useRef<string | null>(null);
+  const notePreviewRef = useRef<HTMLDivElement | null>(null);
   tokenRef.current = token ?? null;
   selectedConvRef.current = selectedConversationId;
+
+  /** Прокрутить заметку к месту выделенного текста (для комментария) и подсветить */
+  const scrollToSelectionInNote = useCallback(
+    (selectionStart: number, selectionEnd: number) => {
+      const container = notePreviewRef.current;
+      const content = selectedNote?.content;
+      if (!container || !content) return;
+      const targetText = content.substring(selectionStart, selectionEnd);
+      if (!targetText.trim()) return;
+      const fullText = container.textContent || "";
+      let pos = fullText.indexOf(targetText);
+      if (pos === -1) {
+        const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+        const normFull = norm(fullText);
+        const normTarget = norm(targetText);
+        const posNorm = normFull.indexOf(normTarget);
+        if (posNorm === -1) return;
+        let normIdx = 0;
+        for (let i = 0; i < fullText.length; i++) {
+          if (normIdx === posNorm) {
+            pos = i;
+            break;
+          }
+          const c = fullText.charAt(i);
+          if (/\s/.test(c)) {
+            if (normIdx > 0 && normFull.charAt(normIdx - 1) !== " ") normIdx++;
+          } else {
+            normIdx++;
+          }
+        }
+      }
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let charCount = 0;
+      let targetNode: Node | null = null;
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const len = node.textContent?.length || 0;
+        if (charCount + len > pos) {
+          targetNode = node;
+          break;
+        }
+        charCount += len;
+      }
+      if (targetNode?.parentElement) {
+        const el = targetNode.parentElement;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("comment-highlight");
+        setTimeout(() => el.classList.remove("comment-highlight"), 2000);
+      }
+    },
+    [selectedNote?.content]
+  );
 
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
   const totalUnread = conversations.reduce((s, c) => s + (c.unreadCount ?? 0), 0);
@@ -774,55 +827,60 @@ export default function ChatPage() {
             </header>
             <div style={{ flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }}>
               <div 
+                ref={notePreviewRef}
                 className="preview"
                 style={{ maxWidth: "100%", wordWrap: "break-word" }}
                 onMouseUp={(e) => {
                   const selection = window.getSelection();
-                  if (selection && selection.toString().trim()) {
-                    const range = selection.getRangeAt(0);
-                    const previewElement = e.currentTarget;
-                    const textContent = previewElement.textContent || "";
-                    
-                    // Находим позиции в исходном тексте заметки
-                    const walker = document.createTreeWalker(
-                      previewElement,
-                      NodeFilter.SHOW_TEXT,
-                      null
-                    );
-                    
-                    let charCount = 0;
-                    let start = -1;
-                    let end = -1;
-                    
-                    const rangeStartContainer = range.startContainer;
-                    const rangeEndContainer = range.endContainer;
-                    const rangeStartOffset = range.startOffset;
-                    const rangeEndOffset = range.endOffset;
-                    
-                    let node;
-                    while (node = walker.nextNode()) {
-                      const nodeLength = node.textContent?.length || 0;
-                      
-                      if (node === rangeStartContainer && start === -1) {
-                        start = charCount + rangeStartOffset;
+                  const selectedString = selection?.toString().trim();
+                  if (!selection || !selectedString) {
+                    setSelectedText(null);
+                    return;
+                  }
+                  // Позиции из TreeWalker относятся к отрендеренному textContent, а не к markdown.
+                  // Ищем выделенный текст в исходном markdown — так координаты совпадают с контентом заметки.
+                  const markdownText = selectedNote.content;
+                  const idx = markdownText.indexOf(selectedString);
+                  if (idx !== -1) {
+                    setSelectedText({ start: idx, end: idx + selectedString.length });
+                  } else {
+                    // Пробуем с нормализованными пробелами (рендер может схлопывать пробелы/переносы)
+                    const normalizedContent = markdownText.replace(/\s+/g, " ");
+                    const normalizedSelected = selectedString.replace(/\s+/g, " ");
+                    const idxNorm = normalizedContent.indexOf(normalizedSelected);
+                    if (idxNorm !== -1) {
+                      const len = normalizedSelected.length;
+                      // Строим маппинг: индекс в normalizedContent -> начало/конец в markdown
+                      const normToStart: number[] = [];
+                      const normToEnd: number[] = [];
+                      let normIdx = 0;
+                      let i = 0;
+                      while (i < markdownText.length && normIdx <= idxNorm + len) {
+                        if (/\s/.test(markdownText.charAt(i))) {
+                          const start = i;
+                          while (i < markdownText.length && /\s/.test(markdownText.charAt(i))) i++;
+                          if (normIdx > 0) {
+                            normToStart[normIdx] = start;
+                            normToEnd[normIdx] = i;
+                            normIdx++;
+                          }
+                        } else {
+                          normToStart[normIdx] = i;
+                          normToEnd[normIdx] = i + 1;
+                          normIdx++;
+                          i++;
+                        }
                       }
-                      if (node === rangeEndContainer && end === -1) {
-                        end = charCount + rangeEndOffset;
-                        break;
+                      const startInOriginal = normToStart[idxNorm];
+                      const endInOriginal = normToEnd[idxNorm + len - 1];
+                      if (startInOriginal != null && endInOriginal != null) {
+                        setSelectedText({ start: startInOriginal, end: endInOriginal });
+                      } else {
+                        setSelectedText(null);
                       }
-                      
-                      charCount += nodeLength;
-                    }
-                    
-                    if (start !== -1 && end !== -1 && start !== end) {
-                      // Находим соответствующие позиции в исходном Markdown
-                      const markdownText = selectedNote.content;
-                      setSelectedText({ start, end });
                     } else {
                       setSelectedText(null);
                     }
-                  } else {
-                    setSelectedText(null);
                   }
                 }}
               >
@@ -889,13 +947,48 @@ export default function ChatPage() {
                     return (
                       <div
                         key={comment.id}
+                        role={hasSelection ? "button" : undefined}
+                        tabIndex={hasSelection ? 0 : undefined}
+                        onClick={
+                          hasSelection
+                            ? () => scrollToSelectionInNote(comment.selectionStart!, comment.selectionEnd!)
+                            : undefined
+                        }
+                        onKeyDown={
+                          hasSelection
+                            ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  scrollToSelectionInNote(comment.selectionStart!, comment.selectionEnd!);
+                                }
+                              }
+                            : undefined
+                        }
                         style={{
                           marginBottom: "1rem",
                           padding: "0.75rem",
                           background: "#f9fafb",
                           borderRadius: "8px",
-                          border: "1px solid #e5e7eb"
+                          border: "1px solid #e5e7eb",
+                          ...(hasSelection && {
+                            cursor: "pointer",
+                            transition: "background 0.15s ease"
+                          })
                         }}
+                        onMouseEnter={
+                          hasSelection
+                            ? (e) => {
+                                e.currentTarget.style.background = "#eef2ff";
+                              }
+                            : undefined
+                        }
+                        onMouseLeave={
+                          hasSelection
+                            ? (e) => {
+                                e.currentTarget.style.background = "#f9fafb";
+                              }
+                            : undefined
+                        }
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "0.5rem" }}>
                           <div>
@@ -906,8 +999,10 @@ export default function ChatPage() {
                           </div>
                           {hasSelection && (
                             <button
+                              type="button"
                               className="btn ghost"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 const newExpanded = new Set(expandedComments);
                                 if (isExpanded) {
                                   newExpanded.delete(comment.id);

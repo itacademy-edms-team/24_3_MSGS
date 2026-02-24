@@ -361,6 +361,13 @@ textarea:focus,
   border: 1px solid #e4e7ec;
 }
 
+/* Подсветка места в заметке при переходе по комментарию */
+.preview .comment-highlight {
+  background: rgba(76, 61, 247, 0.2);
+  border-radius: 4px;
+  transition: background 0.5s ease-out;
+}
+
 .empty-state {
   padding: 2rem;
   color: #475467;
