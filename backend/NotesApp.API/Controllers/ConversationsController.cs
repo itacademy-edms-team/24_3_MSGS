@@ -28,7 +28,6 @@ namespace NotesApp.API.Controllers
             var conversations = await _context.Conversations
                 .Include(c => c.User1)
                 .Include(c => c.User2)
-                .Include(c => c.Messages.OrderByDescending(m => m.SentAt).Take(1))
                 .Where(c => c.User1Id == userId || c.User2Id == userId)
                 .OrderByDescending(c => c.UpdatedAt)
                 .Select(c => new ConversationDto
@@ -40,9 +39,9 @@ namespace NotesApp.API.Controllers
                     User2Username = c.User2.Username,
                     CreatedAt = c.CreatedAt,
                     UpdatedAt = c.UpdatedAt,
-                    LastMessageId = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.Id : null,
-                    LastMessageContent = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.Content : null,
-                    LastMessageSentAt = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.SentAt : null,
+                    LastMessageId = c.Messages.OrderByDescending(m => m.SentAt).Select(m => (int?)m.Id).FirstOrDefault(),
+                    LastMessageContent = c.Messages.OrderByDescending(m => m.SentAt).Select(m => m.Content).FirstOrDefault(),
+                    LastMessageSentAt = c.Messages.OrderByDescending(m => m.SentAt).Select(m => (DateTime?)m.SentAt).FirstOrDefault(),
                     UnreadCount = 0
                 })
                 .ToListAsync();
@@ -78,6 +77,7 @@ namespace NotesApp.API.Controllers
                 return NotFound();
             }
 
+            var lastMsg = conversation.Messages.OrderByDescending(m => m.SentAt).FirstOrDefault();
             var lastRead = await _context.ConversationReadStates
                 .Where(crs => crs.UserId == userId && crs.ConversationId == id)
                 .Select(crs => crs.LastReadMessageId)
@@ -94,9 +94,9 @@ namespace NotesApp.API.Controllers
                 User2Username = conversation.User2.Username,
                 CreatedAt = conversation.CreatedAt,
                 UpdatedAt = conversation.UpdatedAt,
-                LastMessageId = conversation.Messages.FirstOrDefault()?.Id,
-                LastMessageContent = conversation.Messages.FirstOrDefault()?.Content,
-                LastMessageSentAt = conversation.Messages.FirstOrDefault()?.SentAt,
+                LastMessageId = lastMsg?.Id,
+                LastMessageContent = lastMsg?.Content,
+                LastMessageSentAt = lastMsg?.SentAt,
                 UnreadCount = unreadCount
             };
         }
