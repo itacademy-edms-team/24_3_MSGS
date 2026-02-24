@@ -22,6 +22,15 @@ function normalizeMessage(msg: Record<string, unknown>): Message {
   };
 }
 
+type ChatNotification = {
+  id: string;
+  conversationId: number;
+  username: string;
+  content: string;
+  sentAt: string;
+  noteId?: number;
+};
+
 export default function ChatPage() {
   const { user, token } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -44,11 +53,15 @@ export default function ChatPage() {
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
   const [hubConnected, setHubConnected] = useState(false);
   const [hubError, setHubError] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<ChatNotification[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const userRef = useRef<number | undefined>(user?.id);
+  userRef.current = user?.id;
   const connectionRef = useRef<SignalR.HubConnection | null>(null);
   const selectedConvRef = useRef<number | null>(null);
   const prevConversationIdRef = useRef<number | null>(null);
   const loadConversationsRef = useRef<( () => Promise<void>) | null>(null);
+  const joinedConversationIdsRef = useRef<Set<number>>(new Set());
   selectedConvRef.current = selectedConversationId;
 
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
@@ -139,10 +152,27 @@ export default function ChatPage() {
     connection.on("ReceiveMessage", (msg: Record<string, unknown>) => {
       const normalized = normalizeMessage(msg);
       const currentConvId = selectedConvRef.current;
-      if (normalized.conversationId !== currentConvId) return;
-      setMessages((prev) =>
-        prev.some((m) => m.id === normalized.id) ? prev : [...prev, normalized]
-      );
+      const isCurrentChat = normalized.conversationId === currentConvId;
+      const isFromOther = normalized.userId !== userRef.current;
+
+      if (isCurrentChat) {
+        setMessages((prev) =>
+          prev.some((m) => m.id === normalized.id) ? prev : [...prev, normalized]
+        );
+      } else if (isFromOther && normalized.conversationId != null) {
+        const notif: ChatNotification = {
+          id: `msg-${normalized.id}-${Date.now()}`,
+          conversationId: normalized.conversationId,
+          username: normalized.username,
+          content: normalized.noteId ? "Поделился заметкой" : normalized.content,
+          sentAt: normalized.sentAt,
+          noteId: normalized.noteId ?? undefined
+        };
+        setNotifications((prev) => [...prev.slice(-4), notif]);
+        setTimeout(() => {
+          setNotifications((n) => n.filter((x) => x.id !== notif.id));
+        }, 5000);
+      }
       loadConversationsRef.current?.();
     });
 
@@ -156,12 +186,10 @@ export default function ChatPage() {
     connection.onreconnecting(updateConnected);
     connection.onreconnected(updateConnected);
 
-    // После переподключения снова вступаем в группу текущего чата
+    // После переподключения снова вступаем во все чаты
     connection.onreconnected(() => {
-      const convId = selectedConvRef.current;
-      if (convId != null) {
-        connection.invoke("JoinConversation", convId).catch(() => {});
-      }
+      const ids = Array.from(joinedConversationIdsRef.current);
+      ids.forEach((id) => connection.invoke("JoinConversation", id).catch(() => {}));
     });
 
     connection
@@ -169,12 +197,7 @@ export default function ChatPage() {
       .then(() => {
         setHubConnected(true);
         setHubError(null);
-        const convId = selectedConvRef.current;
-        if (convId != null) {
-          connection.invoke("JoinConversation", convId).catch((e) =>
-            console.error("JoinConversation failed:", e)
-          );
-        }
+        // Подписку на все чаты делаем в отдельном эффекте после загрузки списка
       })
       .catch((err) => {
         const message = err?.message ?? String(err);
@@ -192,45 +215,27 @@ export default function ChatPage() {
       connection.onreconnected(() => {});
       setHubConnected(false);
       setHubError(null);
-      const leave =
-        prevConversationIdRef.current != null
-          ? connection.invoke("LeaveConversation", prevConversationIdRef.current)
-          : Promise.resolve();
-      leave.finally(() => connection.stop()).catch(() => {});
+      joinedConversationIdsRef.current = new Set();
+      connection.stop().catch(() => {});
       connectionRef.current = null;
       prevConversationIdRef.current = null;
     };
   }, [token]);
 
-  // При смене выбранного чата — переподключаемся к группе SignalR
+  // Подписываемся на все чаты пользователя, чтобы получать сообщения и показывать пуш
   useEffect(() => {
     const conn = connectionRef.current;
-    if (!conn || conn.state !== SignalR.HubConnectionState.Connected) return;
-    const prevId = prevConversationIdRef.current;
-    if (prevId != null) {
-      conn.invoke("LeaveConversation", prevId).catch(() => {});
-    }
-    if (selectedConversationId != null) {
-      conn.invoke("JoinConversation", selectedConversationId).catch(() => {});
-    }
-    prevConversationIdRef.current = selectedConversationId;
-  }, [selectedConversationId]);
+    if (!conn || !hubConnected || conversations.length === 0) return;
+    conversations.forEach((c) => {
+      if (joinedConversationIdsRef.current.has(c.id)) return;
+      joinedConversationIdsRef.current = new Set([...joinedConversationIdsRef.current, c.id]);
+      conn.invoke("JoinConversation", c.id).catch(() => {});
+    });
+  }, [hubConnected, conversations]);
 
-  // Если чат выбран до установки соединения — вступаем в группу, как только подключимся
+  // При смене выбранного чата только обновляем ref (все группы уже подключены)
   useEffect(() => {
-    if (selectedConversationId == null) return;
-    const conn = connectionRef.current;
-    if (!conn || conn.state === SignalR.HubConnectionState.Connected) return;
-    const id = setInterval(() => {
-      const c = connectionRef.current;
-      if (!c || c.state !== SignalR.HubConnectionState.Connected) return;
-      const convId = selectedConvRef.current;
-      if (convId != null) {
-        c.invoke("JoinConversation", convId).catch(() => {});
-      }
-      clearInterval(id);
-    }, 600);
-    return () => clearInterval(id);
+    prevConversationIdRef.current = selectedConversationId;
   }, [selectedConversationId]);
 
   useEffect(() => {
@@ -256,6 +261,11 @@ export default function ChatPage() {
   const handleSelectConversation = (conversationId: number) => {
     setSelectedConversationId(conversationId);
     setShowShareNotes(false);
+  };
+
+  const dismissNotification = (id: string, conversationId?: number) => {
+    setNotifications((n) => n.filter((x) => x.id !== id));
+    if (conversationId != null) setSelectedConversationId(conversationId);
   };
 
   const handleStartConversation = async (friendId: number) => {
@@ -891,6 +901,59 @@ export default function ChatPage() {
           <span>{status}</span>
         </div>
       )}
+
+      {/* Пуш-уведомления о новых сообщениях — левый нижний угол */}
+      <div
+        className="chat-notifications"
+        style={{
+          position: "fixed",
+          bottom: "1rem",
+          left: "1rem",
+          zIndex: 10000,
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.5rem",
+          maxWidth: "320px"
+        }}
+      >
+        {notifications.map((n) => (
+          <button
+            key={n.id}
+            type="button"
+            onClick={() => dismissNotification(n.id, n.conversationId)}
+            style={{
+              display: "block",
+              textAlign: "left",
+              width: "100%",
+              padding: "0.75rem 1rem",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "12px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+              cursor: "pointer",
+              transition: "transform 0.15s ease, box-shadow 0.15s ease"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateX(4px)";
+              e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.15)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateX(0)";
+              e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.12)";
+            }}
+          >
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "#4c3df7", marginBottom: "0.25rem" }}>
+              {n.username}
+            </div>
+            <div style={{ fontSize: "0.85rem", color: "#374151", lineHeight: 1.3 }}>
+              {n.content.length > 60 ? `${n.content.slice(0, 60)}…` : n.content}
+            </div>
+            <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.25rem" }}>
+              {new Date(n.sentAt).toLocaleTimeString()}
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
