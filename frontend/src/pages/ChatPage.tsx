@@ -62,9 +62,12 @@ export default function ChatPage() {
   const prevConversationIdRef = useRef<number | null>(null);
   const loadConversationsRef = useRef<( () => Promise<void>) | null>(null);
   const joinedConversationIdsRef = useRef<Set<number>>(new Set());
+  const tokenRef = useRef<string | null>(null);
+  tokenRef.current = token ?? null;
   selectedConvRef.current = selectedConversationId;
 
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
+  const totalUnread = conversations.reduce((s, c) => s + (c.unreadCount ?? 0), 0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -105,11 +108,12 @@ export default function ChatPage() {
     }
   }, [token]);
 
-  const loadMessages = useCallback(async (conversationId: number) => {
+  const loadMessages = useCallback(async (conversationId: number): Promise<Message[] | void> => {
     if (!token) return;
     try {
       const data = await api.getConversationMessages(token, conversationId);
       setMessages(data);
+      return data;
     } catch (error) {
       showStatus(
         error instanceof Error ? error.message : "Ошибка загрузки сообщений",
@@ -159,6 +163,11 @@ export default function ChatPage() {
         setMessages((prev) =>
           prev.some((m) => m.id === normalized.id) ? prev : [...prev, normalized]
         );
+        if (normalized.conversationId != null && tokenRef.current) {
+          api.markConversationRead(tokenRef.current, normalized.conversationId, normalized.id).then(
+            () => loadConversationsRef.current?.()
+          );
+        }
       } else if (isFromOther && normalized.conversationId != null) {
         const notif: ChatNotification = {
           id: `msg-${normalized.id}-${Date.now()}`,
@@ -245,12 +254,25 @@ export default function ChatPage() {
   }, [loadConversations, loadFriends]);
 
   useEffect(() => {
-    if (selectedConversationId) {
-      loadMessages(selectedConversationId);
-    } else {
-      setMessages([]);
+    if (!selectedConversationId || !token) {
+      if (!selectedConversationId) setMessages([]);
+      return;
     }
-  }, [selectedConversationId, loadMessages]);
+    // Тот же механизм, что при отправке: берём актуальные данные с сервера, затем отмечаем прочитанным и обновляем список.
+    const markReadAndRefresh = (lastMessageId: number) => {
+      api
+        .markConversationRead(token!, selectedConversationId!, lastMessageId)
+        .then(() => loadConversationsRef.current?.());
+    };
+    api
+      .getConversation(token, selectedConversationId)
+      .then((conv) => {
+        const lastMessageId = conv?.lastMessageId ?? 0;
+        markReadAndRefresh(lastMessageId);
+      })
+      .catch(() => markReadAndRefresh(0));
+    loadMessages(selectedConversationId);
+  }, [selectedConversationId, token]);
 
   useEffect(() => {
     if (showShareNotes) {
@@ -294,9 +316,15 @@ export default function ChatPage() {
         content: messageInput.trim(),
         conversationId: selectedConversationId
       });
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) =>
+        prev.some((m) => m.id === message.id) ? prev : [...prev, message]
+      );
       setMessageInput("");
-      loadConversations(); // Обновляем список чатов для обновления последнего сообщения
+      // Тот же механизм, что при открытии чата: отмечаем прочитанным до последнего сообщения и обновляем список
+      api
+        .markConversationRead(token, selectedConversationId, message.id)
+        .then(() => loadConversationsRef.current?.())
+        .catch(() => loadConversations());
     } catch (error) {
       showStatus(
         error instanceof Error ? error.message : "Ошибка отправки сообщения",
@@ -410,6 +438,18 @@ export default function ChatPage() {
         <div className="sidebar-section">
           <div className="section-header">
             <h3>Чаты</h3>
+            {totalUnread > 0 && (
+              <span
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  background: "#4c3df7",
+                  flexShrink: 0
+                }}
+                title={`${totalUnread} непрочитанных`}
+              />
+            )}
             <span className="badge">{conversations.length}</span>
           </div>
 
@@ -420,16 +460,21 @@ export default function ChatPage() {
                 className={selectedConversationId === conversation.id ? "active" : ""}
                 onClick={() => handleSelectConversation(conversation.id)}
               >
-                <div>
-                  <span>{getOtherUser(conversation)}</span>
-                  {conversation.lastMessageContent && (
-                    <p className="note-meta" style={{ fontSize: "0.85rem", marginTop: "0.25rem" }}>
-                      {conversation.lastMessageContent.length > 30
-                        ? conversation.lastMessageContent.substring(0, 30) + "..."
-                        : conversation.lastMessageContent}
-                    </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>{getOtherUser(conversation)}</span>
+                  {(conversation.unreadCount ?? 0) > 0 && (
+                    <span className="badge" style={{ flexShrink: 0 }}>
+                      {conversation.unreadCount! > 99 ? "99+" : conversation.unreadCount}
+                    </span>
                   )}
                 </div>
+                {conversation.lastMessageContent && (
+                  <p className="note-meta" style={{ fontSize: "0.85rem", marginTop: "0.25rem" }}>
+                    {conversation.lastMessageContent.length > 30
+                      ? conversation.lastMessageContent.substring(0, 30) + "..."
+                      : conversation.lastMessageContent}
+                  </p>
+                )}
               </li>
             ))}
           </ul>

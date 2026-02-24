@@ -12,6 +12,8 @@ namespace NotesApp.API.Models.Conversations
         public int? LastMessageId { get; set; }
         public string? LastMessageContent { get; set; }
         public DateTime? LastMessageSentAt { get; set; }
+        /// <summary>Количество непрочитанных сообщений в чате для текущего пользователя.</summary>
+        public int UnreadCount { get; set; }
     }
 }
 

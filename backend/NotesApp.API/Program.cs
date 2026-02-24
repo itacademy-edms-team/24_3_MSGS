@@ -114,6 +114,36 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Создать таблицу ConversationReadStates, если её нет (миграция могла не примениться без psql)
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<NotesDbContext>();
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+CREATE TABLE IF NOT EXISTS ""ConversationReadStates"" (
+    ""UserId"" integer NOT NULL,
+    ""ConversationId"" integer NOT NULL,
+    ""LastReadMessageId"" integer NOT NULL,
+    CONSTRAINT ""PK_ConversationReadStates"" PRIMARY KEY (""UserId"", ""ConversationId""),
+    CONSTRAINT ""FK_ConversationReadStates_Conversations_ConversationId"" FOREIGN KEY (""ConversationId"") REFERENCES ""Conversations"" (""Id"") ON DELETE CASCADE,
+    CONSTRAINT ""FK_ConversationReadStates_Users_UserId"" FOREIGN KEY (""UserId"") REFERENCES ""Users"" (""Id"") ON DELETE CASCADE
+);
+");
+        await db.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_ConversationReadStates_ConversationId"" ON ""ConversationReadStates"" (""ConversationId"");");
+        await db.Database.ExecuteSqlRawAsync(@"
+INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+VALUES ('20260224170000_AddConversationReadState', '9.0.10')
+ON CONFLICT (""MigrationId"") DO NOTHING;
+");
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(ex, "EnsureConversationReadStates: {Message}", ex.Message);
+    }
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {

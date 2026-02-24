@@ -42,9 +42,22 @@ namespace NotesApp.API.Controllers
                     UpdatedAt = c.UpdatedAt,
                     LastMessageId = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.Id : null,
                     LastMessageContent = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.Content : null,
-                    LastMessageSentAt = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.SentAt : null
+                    LastMessageSentAt = c.Messages.FirstOrDefault() != null ? c.Messages.FirstOrDefault()!.SentAt : null,
+                    UnreadCount = 0
                 })
                 .ToListAsync();
+
+            var convIds = conversations.Select(c => c.Id).ToList();
+            var readStates = await _context.ConversationReadStates
+                .Where(crs => crs.UserId == userId && convIds.Contains(crs.ConversationId))
+                .ToDictionaryAsync(crs => crs.ConversationId, crs => crs.LastReadMessageId);
+
+            foreach (var conv in conversations)
+            {
+                var lastRead = readStates.GetValueOrDefault(conv.Id, 0);
+                conv.UnreadCount = await _context.Messages
+                    .CountAsync(m => m.ConversationId == conv.Id && m.Id > lastRead && m.UserId != userId);
+            }
 
             return conversations;
         }
@@ -65,6 +78,13 @@ namespace NotesApp.API.Controllers
                 return NotFound();
             }
 
+            var lastRead = await _context.ConversationReadStates
+                .Where(crs => crs.UserId == userId && crs.ConversationId == id)
+                .Select(crs => crs.LastReadMessageId)
+                .FirstOrDefaultAsync();
+            var unreadCount = await _context.Messages
+                .CountAsync(m => m.ConversationId == id && m.Id > lastRead && m.UserId != userId);
+
             return new ConversationDto
             {
                 Id = conversation.Id,
@@ -76,8 +96,39 @@ namespace NotesApp.API.Controllers
                 UpdatedAt = conversation.UpdatedAt,
                 LastMessageId = conversation.Messages.FirstOrDefault()?.Id,
                 LastMessageContent = conversation.Messages.FirstOrDefault()?.Content,
-                LastMessageSentAt = conversation.Messages.FirstOrDefault()?.SentAt
+                LastMessageSentAt = conversation.Messages.FirstOrDefault()?.SentAt,
+                UnreadCount = unreadCount
             };
+        }
+
+        // POST: api/conversations/{id}/read - отметить чат прочитанным до сообщения
+        [HttpPost("{id}/read")]
+        public async Task<IActionResult> MarkAsRead(int id, [FromBody] MarkConversationReadDto dto)
+        {
+            var userId = GetCurrentUserId();
+            var conversation = await _context.Conversations
+                .FirstOrDefaultAsync(c => c.Id == id && (c.User1Id == userId || c.User2Id == userId));
+            if (conversation == null)
+                return NotFound();
+
+            var state = await _context.ConversationReadStates
+                .FirstOrDefaultAsync(crs => crs.UserId == userId && crs.ConversationId == id);
+            if (state != null)
+            {
+                if (dto.LastMessageId > state.LastReadMessageId)
+                    state.LastReadMessageId = dto.LastMessageId;
+            }
+            else
+            {
+                _context.ConversationReadStates.Add(new ConversationReadState
+                {
+                    UserId = userId,
+                    ConversationId = id,
+                    LastReadMessageId = dto.LastMessageId
+                });
+            }
+            await _context.SaveChangesAsync();
+            return NoContent();
         }
 
         // POST: api/conversations - создать или получить чат с пользователем
@@ -109,7 +160,8 @@ namespace NotesApp.API.Controllers
                     User2Id = existingConversation.User2Id,
                     User2Username = existingConversation.User2.Username,
                     CreatedAt = existingConversation.CreatedAt,
-                    UpdatedAt = existingConversation.UpdatedAt
+                    UpdatedAt = existingConversation.UpdatedAt,
+                    UnreadCount = 0
                 };
             }
 
@@ -162,7 +214,8 @@ namespace NotesApp.API.Controllers
                 User2Id = conversation.User2Id,
                 User2Username = conversation.User2.Username,
                 CreatedAt = conversation.CreatedAt,
-                UpdatedAt = conversation.UpdatedAt
+                UpdatedAt = conversation.UpdatedAt,
+                UnreadCount = 0
             };
         }
 
@@ -181,6 +234,11 @@ namespace NotesApp.API.Controllers
     public class CreateConversationDto
     {
         public int UserId { get; set; }
+    }
+
+    public class MarkConversationReadDto
+    {
+        public int LastMessageId { get; set; }
     }
 }
 

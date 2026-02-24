@@ -170,6 +170,12 @@ export const api = {
       token,
       body: payload
     }),
+  markConversationRead: (token: string, conversationId: number, lastMessageId: number) =>
+    request<void>(`/conversations/${conversationId}/read`, {
+      method: "POST",
+      token,
+      body: { lastMessageId }
+    }),
   // Messages
   getConversationMessages: (token: string, conversationId: number, limit?: number) =>
     request<Message[]>(`/messages/conversation/${conversationId}${limit ? `?limit=${limit}` : ""}`, {

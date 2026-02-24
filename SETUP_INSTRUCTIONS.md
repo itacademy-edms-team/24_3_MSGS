@@ -77,3 +77,5 @@ Frontend по умолчанию доступен по адресу: `http://loc
 2. **CORS ошибки**: Убедитесь, что backend запущен на порту 7000
 3. **TypeScript ошибки**: Выполните `npm run build` в папке frontend
 4. **Порт занят**: Измените порты в конфигурации при необходимости
+5. **Ошибка «ConversationReadStates не существует» (500 при открытии чатов):**  
+   Миграция могла не примениться. Выполните вручную SQL-скрипт из `backend/NotesApp.API/Migrations/CreateConversationReadStates_manual.sql` в вашей БД (pgAdmin или `psql -U postgres -d msgs -f backend/NotesApp.API/Migrations/CreateConversationReadStates_manual.sql`), затем перезапустите API.

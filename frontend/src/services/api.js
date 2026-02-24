@@ -114,6 +114,11 @@ export const api = {
         token,
         body: payload
     }),
+    markConversationRead: (token, conversationId, lastMessageId) => request(`/conversations/${conversationId}/read`, {
+        method: "POST",
+        token,
+        body: { lastMessageId }
+    }),
     // Messages
     getConversationMessages: (token, conversationId, limit) => request(`/messages/conversation/${conversationId}${limit ? `?limit=${limit}` : ""}`, {
         token

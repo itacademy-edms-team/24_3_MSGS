@@ -79,6 +79,7 @@ export type Conversation = {
   lastMessageId?: number | null;
   lastMessageContent?: string | null;
   lastMessageSentAt?: string | null;
+  unreadCount?: number;
 };
 
 export type Message = {

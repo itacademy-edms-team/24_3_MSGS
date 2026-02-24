@@ -16,6 +16,7 @@ namespace NotesApp.API.Data
         public DbSet<Message> Messages { get; set; }
         public DbSet<Friendship> Friendships { get; set; }
         public DbSet<Conversation> Conversations { get; set; }
+        public DbSet<ConversationReadState> ConversationReadStates { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -50,6 +51,21 @@ namespace NotesApp.API.Data
             modelBuilder.Entity<Conversation>()
                 .HasIndex(c => new { c.User1Id, c.User2Id })
                 .IsUnique();
+
+            modelBuilder.Entity<ConversationReadState>()
+                .HasKey(crs => new { crs.UserId, crs.ConversationId });
+
+            modelBuilder.Entity<ConversationReadState>()
+                .HasOne(crs => crs.User)
+                .WithMany()
+                .HasForeignKey(crs => crs.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ConversationReadState>()
+                .HasOne(crs => crs.Conversation)
+                .WithMany()
+                .HasForeignKey(crs => crs.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             // Настройка каскадного удаления
             modelBuilder.Entity<Note>()
