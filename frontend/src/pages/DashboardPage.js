@@ -8,6 +8,7 @@ import { api } from "../services/api";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 const emptyEditor = { title: "", content: "" };
+const AUTOSAVE_DEBOUNCE_MS = 1200;
 export default function DashboardPage() {
     const { token } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -30,6 +31,10 @@ export default function DashboardPage() {
     const [commentInput, setCommentInput] = useState("");
     const [showComments, setShowComments] = useState(false);
     const contentTextareaRef = useRef(null);
+    const loadedNoteIdRef = useRef(null);
+    const savedSnapshotRef = useRef({ title: "", content: "" });
+    const editorRef = useRef(emptyEditor);
+    editorRef.current = editor;
     const selectedNote = useMemo(() => notes.find((note) => note.id === selectedNoteId) ?? null, [notes, selectedNoteId]);
     const filteredNotes = useMemo(() => {
         return notes.filter((note) => {
@@ -63,13 +68,20 @@ export default function DashboardPage() {
             const firstNote = response[0];
             if (firstNote) {
                 setSelectedNoteId(firstNote.id);
-                setEditor({
-                    title: firstNote.title,
-                    content: firstNote.content
-                });
             }
         }
     }, [token, selectedNoteId]);
+    const loadComments = useCallback(async (noteId) => {
+        if (!token)
+            return;
+        try {
+            const data = await api.getNoteComments(token, noteId);
+            setComments(data);
+        }
+        catch {
+            // Игнорируем ошибки загрузки комментариев
+        }
+    }, [token]);
     useEffect(() => {
         setLoading(true);
         Promise.all([loadFolders(), loadNotes()])
@@ -85,7 +97,6 @@ export default function DashboardPage() {
                 const note = notes.find((n) => n.id === noteId);
                 if (note) {
                     setSelectedNoteId(noteId);
-                    setEditor({ title: note.title, content: note.content });
                     // Убираем параметр из URL после открытия заметки
                     setSearchParams({});
                 }
@@ -93,29 +104,76 @@ export default function DashboardPage() {
         }
     }, [notes, searchParams, setSearchParams]);
     useEffect(() => {
-        if (selectedNote) {
-            setEditor({ title: selectedNote.title, content: selectedNote.content });
-            loadComments(selectedNote.id);
-        }
-        else {
+        if (!selectedNoteId) {
+            loadedNoteIdRef.current = null;
             setEditor(emptyEditor);
+            savedSnapshotRef.current = { title: "", content: "" };
             setComments([]);
-        }
-    }, [selectedNote]);
-    const loadComments = useCallback(async (noteId) => {
-        if (!token)
             return;
-        try {
-            const data = await api.getNoteComments(token, noteId);
-            setComments(data);
         }
-        catch (error) {
-            // Игнорируем ошибки загрузки комментариев
+        const note = notes.find((n) => n.id === selectedNoteId);
+        if (!note)
+            return;
+        if (loadedNoteIdRef.current !== selectedNoteId) {
+            loadedNoteIdRef.current = selectedNoteId;
+            const payload = { title: note.title, content: note.content };
+            setEditor(payload);
+            savedSnapshotRef.current = { ...payload };
+            void loadComments(selectedNoteId);
         }
-    }, [token]);
+    }, [selectedNoteId, notes, loadComments]);
     const handleSelectNote = (noteId) => {
         setSelectedNoteId(noteId);
     };
+    const persistNote = useCallback(async (options) => {
+        if (!token || !selectedNoteId)
+            return;
+        const ed = editorRef.current;
+        const title = ed.title || "Без названия";
+        const content = ed.content;
+        if (title === savedSnapshotRef.current.title &&
+            content === savedSnapshotRef.current.content) {
+            return;
+        }
+        setSaving(true);
+        try {
+            await api.updateNote(token, selectedNoteId, {
+                title,
+                content,
+                folderId: selectedFolderId
+            });
+            const updatedAt = new Date().toISOString();
+            savedSnapshotRef.current = { title, content };
+            setNotes((prev) => prev.map((note) => note.id === selectedNoteId
+                ? { ...note, title, content, folderId: selectedFolderId ?? null, updatedAt }
+                : note));
+            if (!options?.silent) {
+                showStatus("Заметка сохранена");
+            }
+        }
+        catch (error) {
+            handleError(error);
+        }
+        finally {
+            setSaving(false);
+        }
+    }, [token, selectedNoteId, selectedFolderId, handleError]);
+    useEffect(() => {
+        if (!token || !selectedNoteId || loading)
+            return;
+        const timer = window.setTimeout(() => {
+            void persistNote({ silent: true });
+        }, AUTOSAVE_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
+    }, [
+        editor.title,
+        editor.content,
+        selectedFolderId,
+        selectedNoteId,
+        token,
+        loading,
+        persistNote
+    ]);
     const handleCreateNote = async () => {
         if (!token)
             return;
@@ -137,27 +195,8 @@ export default function DashboardPage() {
             setSaving(false);
         }
     };
-    const handleSaveNote = async () => {
-        if (!token || !selectedNote)
-            return;
-        setSaving(true);
-        try {
-            await api.updateNote(token, selectedNote.id, {
-                title: editor.title || "Без названия",
-                content: editor.content,
-                folderId: selectedFolderId
-            });
-            setNotes((prev) => prev.map((note) => note.id === selectedNote.id
-                ? { ...note, title: editor.title || "Без названия", content: editor.content, folderId: selectedFolderId ?? null, updatedAt: new Date().toISOString() }
-                : note));
-            showStatus("Заметка сохранена");
-        }
-        catch (error) {
-            handleError(error);
-        }
-        finally {
-            setSaving(false);
-        }
+    const handleSaveNote = () => {
+        void persistNote();
     };
     const handleDeleteNote = async (id) => {
         if (!token)
@@ -171,6 +210,7 @@ export default function DashboardPage() {
             if (selectedNoteId === id) {
                 setSelectedNoteId(null);
                 setEditor(emptyEditor);
+                savedSnapshotRef.current = { title: "", content: "" };
             }
             showStatus("Заметка удалена");
         }
@@ -275,7 +315,7 @@ export default function DashboardPage() {
                                                         }, children: "\u00D7" })] })] }, folder.id)))] })] })] }), _jsxs("section", { className: "notes-panel", children: [_jsxs("header", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: selectedFolderId ? folderName(selectedFolderId) : "Все заметки" }), _jsxs("p", { children: [filteredNotes.length, " \u0437\u0430\u043C\u0435\u0442\u043E\u043A"] })] }), _jsxs("div", { className: "panel-actions", children: [_jsx("input", { type: "search", placeholder: "\u041F\u043E\u0438\u0441\u043A...", value: search, onChange: (e) => setSearch(e.target.value) }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, disabled: saving, children: "+ \u041D\u043E\u0432\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430" })] })] }), _jsxs("ul", { className: "notes-list", children: [filteredNotes.map((note) => (_jsxs("li", { className: selectedNoteId === note.id ? "active" : "", onClick: () => handleSelectNote(note.id), children: [_jsxs("div", { children: [_jsx("p", { className: "note-title", children: note.title || "Без названия" }), _jsxs("p", { className: "note-meta", children: [new Date(note.updatedAt).toLocaleString(), " \u2022 ", folderName(note.folderId ?? null)] })] }), _jsx("button", { className: "icon-btn", onClick: (e) => {
                                             e.stopPropagation();
                                             handleDeleteNote(note.id);
-                                        }, children: "\u00D7" })] }, note.id))), !filteredNotes.length && _jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0432 \u044D\u0442\u043E\u0439 \u043F\u0430\u043F\u043A\u0435" })] })] }), _jsx("section", { className: "editor-panel", children: selectedNote ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header spaced", children: [_jsx("input", { type: "text", value: editor.title, onChange: (e) => setEditor((prev) => ({ ...prev, title: e.target.value })), placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsxs("div", { style: {
+                                        }, children: "\u00D7" })] }, note.id))), !filteredNotes.length && _jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0432 \u044D\u0442\u043E\u0439 \u043F\u0430\u043F\u043A\u0435" })] })] }), _jsx("section", { className: "editor-panel", children: selectedNote ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header spaced", children: [_jsx("input", { type: "text", value: editor.title, onChange: (e) => setEditor((prev) => ({ ...prev, title: e.target.value })), placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }, children: [_jsxs("span", { style: { fontSize: "0.75rem", color: "#667085" }, children: ["\u0410\u0432\u0442\u043E\u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 ~", AUTOSAVE_DEBOUNCE_MS / 1000, " \u0441 \u043F\u043E\u0441\u043B\u0435 \u043F\u0430\u0443\u0437\u044B"] }), _jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsxs("div", { style: {
                                                 display: "flex",
                                                 alignItems: "center",
                                                 gap: "0.5rem",

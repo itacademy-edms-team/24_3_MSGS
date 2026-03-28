@@ -15,6 +15,8 @@ type FolderFormState = {
 
 const emptyEditor = { title: "", content: "" };
 
+const AUTOSAVE_DEBOUNCE_MS = 1200;
+
 export default function DashboardPage() {
   const { token } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -37,6 +39,10 @@ export default function DashboardPage() {
   const [commentInput, setCommentInput] = useState("");
   const [showComments, setShowComments] = useState(false);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const loadedNoteIdRef = useRef<number | null>(null);
+  const savedSnapshotRef = useRef<{ title: string; content: string }>({ title: "", content: "" });
+  const editorRef = useRef(emptyEditor);
+  editorRef.current = editor;
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
@@ -77,13 +83,19 @@ export default function DashboardPage() {
       const firstNote = response[0];
       if (firstNote) {
         setSelectedNoteId(firstNote.id);
-        setEditor({
-          title: firstNote.title,
-          content: firstNote.content
-        });
       }
     }
   }, [token, selectedNoteId]);
+
+  const loadComments = useCallback(async (noteId: number) => {
+    if (!token) return;
+    try {
+      const data = await api.getNoteComments(token, noteId);
+      setComments(data);
+    } catch {
+      // Игнорируем ошибки загрузки комментариев
+    }
+  }, [token]);
 
   useEffect(() => {
     setLoading(true);
@@ -101,7 +113,6 @@ export default function DashboardPage() {
         const note = notes.find((n) => n.id === noteId);
         if (note) {
           setSelectedNoteId(noteId);
-          setEditor({ title: note.title, content: note.content });
           // Убираем параметр из URL после открытия заметки
           setSearchParams({});
         }
@@ -110,28 +121,86 @@ export default function DashboardPage() {
   }, [notes, searchParams, setSearchParams]);
 
   useEffect(() => {
-    if (selectedNote) {
-      setEditor({ title: selectedNote.title, content: selectedNote.content });
-      loadComments(selectedNote.id);
-    } else {
+    if (!selectedNoteId) {
+      loadedNoteIdRef.current = null;
       setEditor(emptyEditor);
+      savedSnapshotRef.current = { title: "", content: "" };
       setComments([]);
+      return;
     }
-  }, [selectedNote]);
-
-  const loadComments = useCallback(async (noteId: number) => {
-    if (!token) return;
-    try {
-      const data = await api.getNoteComments(token, noteId);
-      setComments(data);
-    } catch (error) {
-      // Игнорируем ошибки загрузки комментариев
+    const note = notes.find((n) => n.id === selectedNoteId);
+    if (!note) return;
+    if (loadedNoteIdRef.current !== selectedNoteId) {
+      loadedNoteIdRef.current = selectedNoteId;
+      const payload = { title: note.title, content: note.content };
+      setEditor(payload);
+      savedSnapshotRef.current = { ...payload };
+      void loadComments(selectedNoteId);
     }
-  }, [token]);
+  }, [selectedNoteId, notes, loadComments]);
 
   const handleSelectNote = (noteId: number) => {
     setSelectedNoteId(noteId);
   };
+
+  const persistNote = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!token || !selectedNoteId) return;
+      const ed = editorRef.current;
+      const title = ed.title || "Без названия";
+      const content = ed.content;
+      if (
+        title === savedSnapshotRef.current.title &&
+        content === savedSnapshotRef.current.content
+      ) {
+        return;
+      }
+
+      setSaving(true);
+      try {
+        await api.updateNote(token, selectedNoteId, {
+          title,
+          content,
+          folderId: selectedFolderId
+        });
+        const updatedAt = new Date().toISOString();
+        savedSnapshotRef.current = { title, content };
+        setNotes((prev) =>
+          prev.map((note) =>
+            note.id === selectedNoteId
+              ? { ...note, title, content, folderId: selectedFolderId ?? null, updatedAt }
+              : note
+          )
+        );
+        if (!options?.silent) {
+          showStatus("Заметка сохранена");
+        }
+      } catch (error) {
+        handleError(error);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [token, selectedNoteId, selectedFolderId, handleError]
+  );
+
+  useEffect(() => {
+    if (!token || !selectedNoteId || loading) return;
+
+    const timer = window.setTimeout(() => {
+      void persistNote({ silent: true });
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [
+    editor.title,
+    editor.content,
+    selectedFolderId,
+    selectedNoteId,
+    token,
+    loading,
+    persistNote
+  ]);
 
   const handleCreateNote = async () => {
     if (!token) return;
@@ -152,28 +221,8 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSaveNote = async () => {
-    if (!token || !selectedNote) return;
-    setSaving(true);
-    try {
-      await api.updateNote(token, selectedNote.id, {
-        title: editor.title || "Без названия",
-        content: editor.content,
-        folderId: selectedFolderId
-      });
-      setNotes((prev) =>
-        prev.map((note) =>
-          note.id === selectedNote.id
-            ? { ...note, title: editor.title || "Без названия", content: editor.content, folderId: selectedFolderId ?? null, updatedAt: new Date().toISOString() }
-            : note
-        )
-      );
-      showStatus("Заметка сохранена");
-    } catch (error) {
-      handleError(error);
-    } finally {
-      setSaving(false);
-    }
+  const handleSaveNote = () => {
+    void persistNote();
   };
 
   const handleDeleteNote = async (id: number) => {
@@ -187,6 +236,7 @@ export default function DashboardPage() {
       if (selectedNoteId === id) {
         setSelectedNoteId(null);
         setEditor(emptyEditor);
+        savedSnapshotRef.current = { title: "", content: "" };
       }
       showStatus("Заметка удалена");
     } catch (error) {
@@ -420,7 +470,10 @@ export default function DashboardPage() {
                 onChange={(e) => setEditor((prev) => ({ ...prev, title: e.target.value }))}
                 placeholder="Название заметки"
               />
-              <div style={{ display: "flex", gap: "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.75rem", color: "#667085" }}>
+                  Автосохранение ~{AUTOSAVE_DEBOUNCE_MS / 1000} с после паузы
+                </span>
                 <button
                   className="btn secondary"
                   onClick={() => setShowComments(!showComments)}
