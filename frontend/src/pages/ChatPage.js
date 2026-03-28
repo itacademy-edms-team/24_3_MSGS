@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { useAuth } from "../auth/AuthContext";
 import { useChatHub } from "../chat/ChatHubContext";
 import { api } from "../services/api";
+import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
 /** Экраны уже ~1145px ломают сетку чата — переключаемся на полноэкранные панели */
 const CHAT_NARROW_MAX_PX = 1144;
 export default function ChatPage() {
@@ -29,6 +30,7 @@ export default function ChatPage() {
     const [selectedText, setSelectedText] = useState(null);
     const [commentInput, setCommentInput] = useState("");
     const [expandedComments, setExpandedComments] = useState(new Set());
+    const [expandedInlineCommentIds, setExpandedInlineCommentIds] = useState(() => new Set());
     const [isNarrowChat, setIsNarrowChat] = useState(() => typeof window !== "undefined" &&
         window.matchMedia(`(max-width: ${CHAT_NARROW_MAX_PX}px)`).matches);
     const [chatMobilePane, setChatMobilePane] = useState("list");
@@ -355,11 +357,47 @@ export default function ChatPage() {
             setSelectedText(null);
             setCommentInput("");
             setExpandedComments(new Set());
+            setExpandedInlineCommentIds(new Set());
         }
         else {
             setComments([]);
         }
     }, [selectedNote, loadComments]);
+    useLayoutEffect(() => {
+        const el = notePreviewRef.current;
+        const note = selectedNote;
+        if (!el || !note?.content)
+            return;
+        applyNoteCommentHighlights(el, note.content, comments, expandedInlineCommentIds);
+    }, [selectedNote?.id, selectedNote?.content, comments, expandedInlineCommentIds]);
+    useEffect(() => {
+        const root = notePreviewRef.current;
+        if (!root || !selectedNote)
+            return;
+        const onClick = (e) => {
+            const t = e.target;
+            const pin = t.closest?.(".note-comment-pin");
+            if (!pin || !root.contains(pin))
+                return;
+            e.preventDefault();
+            e.stopPropagation();
+            const wrap = pin.closest("[data-comment-id]");
+            const raw = wrap?.getAttribute("data-comment-id");
+            const id = raw ? parseInt(raw, 10) : NaN;
+            if (Number.isNaN(id))
+                return;
+            setExpandedInlineCommentIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id))
+                    next.delete(id);
+                else
+                    next.add(id);
+                return next;
+            });
+        };
+        root.addEventListener("click", onClick);
+        return () => root.removeEventListener("click", onClick);
+    }, [selectedNote?.id]);
     const handleAddComment = async () => {
         if (!token || !selectedNote || !commentInput.trim())
             return;
@@ -593,12 +631,24 @@ export default function ChatPage() {
                                                     ? selectedNote.content.substring(comment.selectionStart, comment.selectionEnd)
                                                     : null;
                                                 return (_jsxs("div", { role: hasSelection ? "button" : undefined, tabIndex: hasSelection ? 0 : undefined, onClick: hasSelection
-                                                        ? () => scrollToSelectionInNote(comment.selectionStart, comment.selectionEnd)
+                                                        ? () => {
+                                                            scrollToSelectionInNote(comment.selectionStart, comment.selectionEnd);
+                                                            setExpandedInlineCommentIds((prev) => {
+                                                                const next = new Set(prev);
+                                                                next.add(comment.id);
+                                                                return next;
+                                                            });
+                                                        }
                                                         : undefined, onKeyDown: hasSelection
                                                         ? (e) => {
                                                             if (e.key === "Enter" || e.key === " ") {
                                                                 e.preventDefault();
                                                                 scrollToSelectionInNote(comment.selectionStart, comment.selectionEnd);
+                                                                setExpandedInlineCommentIds((prev) => {
+                                                                    const next = new Set(prev);
+                                                                    next.add(comment.id);
+                                                                    return next;
+                                                                });
                                                             }
                                                         }
                                                         : undefined, style: {

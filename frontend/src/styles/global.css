@@ -392,6 +392,81 @@ textarea:focus,
   transition: background 0.5s ease-out;
 }
 
+/* Постоянная подсветка фрагментов с комментариями (чат, предпросмотр заметки) */
+.preview .note-comment-highlight {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  margin: 0.1em 0;
+  vertical-align: baseline;
+  background: rgba(76, 61, 247, 0.16);
+  border-radius: 6px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  outline: 1px solid rgba(76, 61, 247, 0.25);
+}
+
+.preview .note-comment-highlight-row {
+  display: inline;
+  line-height: inherit;
+}
+
+.preview .note-comment-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin: 0 0.25em 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: #4c3df7;
+  color: #fff;
+  font-size: 0.6rem;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.preview .note-comment-pin:hover {
+  filter: brightness(1.08);
+}
+
+.preview .note-comment-highlight-inner {
+  display: inline;
+}
+
+.preview .note-comment-inline-popover {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+  font-size: 0.82rem;
+}
+
+.preview .note-comment-inline-popover[hidden] {
+  display: none !important;
+}
+
+.preview .note-comment-inline-popover-author {
+  font-weight: 600;
+  color: #4c3df7;
+  margin-bottom: 0.3rem;
+}
+
+.preview .note-comment-inline-popover-text {
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .empty-state {
   padding: 2rem;
   color: #475467;

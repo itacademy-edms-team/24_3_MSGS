@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useChatHub } from "../chat/ChatHubContext";
 import { api } from "../services/api";
 import type { Conversation, Message, Note, Folder, User } from "../types";
+import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
 
 /** Экраны уже ~1145px ломают сетку чата — переключаемся на полноэкранные панели */
 const CHAT_NARROW_MAX_PX = 1144;
@@ -42,6 +43,9 @@ export default function ChatPage() {
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
+  const [expandedInlineCommentIds, setExpandedInlineCommentIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const [isNarrowChat, setIsNarrowChat] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -381,10 +385,42 @@ export default function ChatPage() {
       setSelectedText(null);
       setCommentInput("");
       setExpandedComments(new Set());
+      setExpandedInlineCommentIds(new Set());
     } else {
       setComments([]);
     }
   }, [selectedNote, loadComments]);
+
+  useLayoutEffect(() => {
+    const el = notePreviewRef.current;
+    const note = selectedNote;
+    if (!el || !note?.content) return;
+    applyNoteCommentHighlights(el, note.content, comments, expandedInlineCommentIds);
+  }, [selectedNote?.id, selectedNote?.content, comments, expandedInlineCommentIds]);
+
+  useEffect(() => {
+    const root = notePreviewRef.current;
+    if (!root || !selectedNote) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      const pin = t.closest?.(".note-comment-pin");
+      if (!pin || !root.contains(pin)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const wrap = pin.closest("[data-comment-id]");
+      const raw = wrap?.getAttribute("data-comment-id");
+      const id = raw ? parseInt(raw, 10) : NaN;
+      if (Number.isNaN(id)) return;
+      setExpandedInlineCommentIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    };
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, [selectedNote?.id]);
 
   const handleAddComment = async () => {
     if (!token || !selectedNote || !commentInput.trim()) return;
@@ -950,7 +986,14 @@ export default function ChatPage() {
                         tabIndex={hasSelection ? 0 : undefined}
                         onClick={
                           hasSelection
-                            ? () => scrollToSelectionInNote(comment.selectionStart!, comment.selectionEnd!)
+                            ? () => {
+                                scrollToSelectionInNote(comment.selectionStart!, comment.selectionEnd!);
+                                setExpandedInlineCommentIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(comment.id);
+                                  return next;
+                                });
+                              }
                             : undefined
                         }
                         onKeyDown={
@@ -959,6 +1002,11 @@ export default function ChatPage() {
                                 if (e.key === "Enter" || e.key === " ") {
                                   e.preventDefault();
                                   scrollToSelectionInNote(comment.selectionStart!, comment.selectionEnd!);
+                                  setExpandedInlineCommentIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(comment.id);
+                                    return next;
+                                  });
                                 }
                               }
                             : undefined
