@@ -193,6 +193,29 @@ textarea:focus,
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.app-sidebar-nav-card {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.06);
+}
+
+.app-main-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.app-main-nav .app-nav-tab--active {
+  background: #eef2ff;
+  color: #4c3df7;
+  font-weight: 600;
 }
 
 .user-card {

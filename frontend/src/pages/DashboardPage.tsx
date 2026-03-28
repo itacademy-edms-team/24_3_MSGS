@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../services/api";
 import type { Folder, Note, Message } from "../types";
+import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 
 type FolderFormState = {
@@ -15,8 +16,7 @@ type FolderFormState = {
 const emptyEditor = { title: "", content: "" };
 
 export default function DashboardPage() {
-  const { user, token, logout } = useAuth();
-  const navigate = useNavigate();
+  const { token } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -298,37 +298,7 @@ export default function DashboardPage() {
   return (
     <div className="dashboard">
       <aside className="sidebar">
-        <div className="user-card">
-          <div className="user-card-header">
-            <div>
-              <p className="user-name">{user?.username}</p>
-              <p className="user-email">{user?.email}</p>
-            </div>
-          </div>
-          <div className="user-card-actions">
-            <button 
-              className="btn ghost" 
-              onClick={() => navigate("/friends")}
-              style={{ width: "100%" }}
-            >
-              Друзья
-            </button>
-            <button 
-              className="btn ghost" 
-              onClick={() => navigate("/chat")}
-              style={{ width: "100%" }}
-            >
-              Чаты
-            </button>
-            <button 
-              className="btn ghost" 
-              onClick={logout} 
-              style={{ width: "100%" }}
-            >
-              Выйти
-            </button>
-          </div>
-        </div>
+        <AppSidebarNav />
 
         <div className="sidebar-section">
           <div className="section-header">

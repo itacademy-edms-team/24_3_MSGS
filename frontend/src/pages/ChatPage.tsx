@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import AppSidebarNav from "../components/AppSidebarNav";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as SignalR from "@microsoft/signalr";
@@ -473,20 +473,7 @@ export default function ChatPage() {
   return (
     <div className="dashboard chat-dashboard">
       <aside className="sidebar">
-        <div className="user-card">
-          <div>
-            <p className="user-name">{user?.username}</p>
-            <p className="user-email">{user?.email}</p>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <Link to="/app" className="btn ghost" style={{ textDecoration: "none", textAlign: "center" }}>
-              Заметки
-            </Link>
-            <Link to="/friends" className="btn ghost" style={{ textDecoration: "none", textAlign: "center" }}>
-              Друзья
-            </Link>
-          </div>
-        </div>
+        <AppSidebarNav />
 
         <div className="sidebar-section">
           <div className="section-header">

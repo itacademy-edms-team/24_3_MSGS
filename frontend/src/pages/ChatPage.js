@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import AppSidebarNav from "../components/AppSidebarNav";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as SignalR from "@microsoft/signalr";
@@ -426,7 +426,7 @@ export default function ChatPage() {
     if (loading) {
         return (_jsxs("div", { className: "fullscreen-center", children: [_jsx("div", { className: "spinner" }), _jsx("p", { children: "\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u043C \u0434\u0430\u043D\u043D\u044B\u0435..." })] }));
     }
-    return (_jsxs("div", { className: "dashboard chat-dashboard", children: [_jsxs("aside", { className: "sidebar", children: [_jsxs("div", { className: "user-card", children: [_jsxs("div", { children: [_jsx("p", { className: "user-name", children: user?.username }), _jsx("p", { className: "user-email", children: user?.email })] }), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: "0.5rem" }, children: [_jsx(Link, { to: "/app", className: "btn ghost", style: { textDecoration: "none", textAlign: "center" }, children: "\u0417\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsx(Link, { to: "/friends", className: "btn ghost", style: { textDecoration: "none", textAlign: "center" }, children: "\u0414\u0440\u0443\u0437\u044C\u044F" })] })] }), _jsxs("div", { className: "sidebar-section", children: [_jsxs("div", { className: "section-header", children: [_jsx("h3", { children: "\u0427\u0430\u0442\u044B" }), totalUnread > 0 && (_jsx("span", { style: {
+    return (_jsxs("div", { className: "dashboard chat-dashboard", children: [_jsxs("aside", { className: "sidebar", children: [_jsx(AppSidebarNav, {}), _jsxs("div", { className: "sidebar-section", children: [_jsxs("div", { className: "section-header", children: [_jsx("h3", { children: "\u0427\u0430\u0442\u044B" }), totalUnread > 0 && (_jsx("span", { style: {
                                             width: "8px",
                                             height: "8px",
                                             borderRadius: "50%",

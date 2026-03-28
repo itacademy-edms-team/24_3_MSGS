@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import AppSidebarNav from "../components/AppSidebarNav";
 import { api } from "../services/api";
 import type { Friendship, User } from "../types";
 
@@ -121,20 +121,7 @@ export default function FriendsPage() {
   return (
     <div className="dashboard">
       <aside className="sidebar">
-        <div className="user-card">
-          <div>
-            <p className="user-name">{user?.username}</p>
-            <p className="user-email">{user?.email}</p>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <Link to="/app" className="btn ghost" style={{ textDecoration: "none", textAlign: "center" }}>
-              Заметки
-            </Link>
-            <Link to="/chat" className="btn ghost" style={{ textDecoration: "none", textAlign: "center" }}>
-              Чаты
-            </Link>
-          </div>
-        </div>
+        <AppSidebarNav />
 
         <div className="sidebar-section">
           <div className="section-header">
