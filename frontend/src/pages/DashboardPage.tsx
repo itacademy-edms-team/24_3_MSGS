@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../services/api";
 import type { Folder, Note, Message } from "../types";
+import { useVoiceDictation } from "../hooks/useVoiceDictation";
 
 type FolderFormState = {
   name: string;
@@ -35,6 +36,7 @@ export default function DashboardPage() {
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [showComments, setShowComments] = useState(false);
+  const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
@@ -230,6 +232,38 @@ export default function DashboardPage() {
     if (!folderId) return "Без папки";
     return folders.find((f) => f.id === folderId)?.name ?? "Без папки";
   };
+
+  const appendTranscriptToContent = useCallback((text: string) => {
+    setEditor((prev) => {
+      const ta = contentTextareaRef.current;
+      const start = ta?.selectionStart ?? prev.content.length;
+      const end = ta?.selectionEnd ?? prev.content.length;
+      const before = prev.content.slice(0, start);
+      const after = prev.content.slice(end);
+      const needsSpace =
+        before.length > 0 &&
+        !/\s$/.test(before) &&
+        text.length > 0 &&
+        !/^\s/.test(text);
+      const piece = (needsSpace ? " " : "") + text;
+      const next = before + piece + after;
+      const caret = before.length + piece.length;
+      requestAnimationFrame(() => {
+        const el = contentTextareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(caret, caret);
+        }
+      });
+      return { ...prev, content: next };
+    });
+  }, []);
+
+  const { supported: voiceSupported, listening: voiceListening, toggle: toggleVoiceInput } =
+    useVoiceDictation(appendTranscriptToContent, {
+      lang: "ru-RU",
+      onNotify: showStatus
+    });
 
   const handleAddComment = async () => {
     if (!token || !selectedNote || !selectedText || !commentInput.trim()) return;
@@ -431,7 +465,41 @@ export default function DashboardPage() {
 
             <div className="editor-columns">
               <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    flexShrink: 0,
+                    marginBottom: "0.35rem"
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={voiceListening ? "btn secondary" : "btn ghost"}
+                    style={
+                      voiceListening
+                        ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
+                        : undefined
+                    }
+                    disabled={!voiceSupported}
+                    onClick={toggleVoiceInput}
+                    title={
+                      !voiceSupported
+                        ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
+                        : voiceListening
+                          ? "Остановить запись"
+                          : "Диктовать текст в позицию курсора"
+                    }
+                  >
+                    {voiceListening ? "⏹ Остановить диктовку" : "🎤 Голосовой ввод"}
+                  </button>
+                  {voiceListening && (
+                    <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>Говорите…</span>
+                  )}
+                </div>
                 <textarea
+                  ref={contentTextareaRef}
                   value={editor.content}
                   onChange={(e) => setEditor((prev) => ({ ...prev, content: e.target.value }))}
                   onMouseUp={(e) => {

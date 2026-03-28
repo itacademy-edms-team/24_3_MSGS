@@ -1,10 +1,11 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../services/api";
+import { useVoiceDictation } from "../hooks/useVoiceDictation";
 const emptyEditor = { title: "", content: "" };
 export default function DashboardPage() {
     const { user, token, logout } = useAuth();
@@ -28,6 +29,7 @@ export default function DashboardPage() {
     const [selectedText, setSelectedText] = useState(null);
     const [commentInput, setCommentInput] = useState("");
     const [showComments, setShowComments] = useState(false);
+    const contentTextareaRef = useRef(null);
     const selectedNote = useMemo(() => notes.find((note) => note.id === selectedNoteId) ?? null, [notes, selectedNoteId]);
     const filteredNotes = useMemo(() => {
         return notes.filter((note) => {
@@ -217,6 +219,34 @@ export default function DashboardPage() {
             return "Без папки";
         return folders.find((f) => f.id === folderId)?.name ?? "Без папки";
     };
+    const appendTranscriptToContent = useCallback((text) => {
+        setEditor((prev) => {
+            const ta = contentTextareaRef.current;
+            const start = ta?.selectionStart ?? prev.content.length;
+            const end = ta?.selectionEnd ?? prev.content.length;
+            const before = prev.content.slice(0, start);
+            const after = prev.content.slice(end);
+            const needsSpace = before.length > 0 &&
+                !/\s$/.test(before) &&
+                text.length > 0 &&
+                !/^\s/.test(text);
+            const piece = (needsSpace ? " " : "") + text;
+            const next = before + piece + after;
+            const caret = before.length + piece.length;
+            requestAnimationFrame(() => {
+                const el = contentTextareaRef.current;
+                if (el) {
+                    el.focus();
+                    el.setSelectionRange(caret, caret);
+                }
+            });
+            return { ...prev, content: next };
+        });
+    }, []);
+    const { supported: voiceSupported, listening: voiceListening, toggle: toggleVoiceInput } = useVoiceDictation(appendTranscriptToContent, {
+        lang: "ru-RU",
+        onNotify: showStatus
+    });
     const handleAddComment = async () => {
         if (!token || !selectedNote || !selectedText || !commentInput.trim())
             return;
@@ -245,7 +275,19 @@ export default function DashboardPage() {
                                                         }, children: "\u00D7" })] })] }, folder.id)))] })] })] }), _jsxs("section", { className: "notes-panel", children: [_jsxs("header", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: selectedFolderId ? folderName(selectedFolderId) : "Все заметки" }), _jsxs("p", { children: [filteredNotes.length, " \u0437\u0430\u043C\u0435\u0442\u043E\u043A"] })] }), _jsxs("div", { className: "panel-actions", children: [_jsx("input", { type: "search", placeholder: "\u041F\u043E\u0438\u0441\u043A...", value: search, onChange: (e) => setSearch(e.target.value) }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, disabled: saving, children: "+ \u041D\u043E\u0432\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430" })] })] }), _jsxs("ul", { className: "notes-list", children: [filteredNotes.map((note) => (_jsxs("li", { className: selectedNoteId === note.id ? "active" : "", onClick: () => handleSelectNote(note.id), children: [_jsxs("div", { children: [_jsx("p", { className: "note-title", children: note.title || "Без названия" }), _jsxs("p", { className: "note-meta", children: [new Date(note.updatedAt).toLocaleString(), " \u2022 ", folderName(note.folderId ?? null)] })] }), _jsx("button", { className: "icon-btn", onClick: (e) => {
                                             e.stopPropagation();
                                             handleDeleteNote(note.id);
-                                        }, children: "\u00D7" })] }, note.id))), !filteredNotes.length && _jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0432 \u044D\u0442\u043E\u0439 \u043F\u0430\u043F\u043A\u0435" })] })] }), _jsx("section", { className: "editor-panel", children: selectedNote ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header spaced", children: [_jsx("input", { type: "text", value: editor.title, onChange: (e) => setEditor((prev) => ({ ...prev, title: e.target.value })), placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsx("textarea", { value: editor.content, onChange: (e) => setEditor((prev) => ({ ...prev, content: e.target.value })), onMouseUp: (e) => {
+                                        }, children: "\u00D7" })] }, note.id))), !filteredNotes.length && _jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0432 \u044D\u0442\u043E\u0439 \u043F\u0430\u043F\u043A\u0435" })] })] }), _jsx("section", { className: "editor-panel", children: selectedNote ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header spaced", children: [_jsx("input", { type: "text", value: editor.title, onChange: (e) => setEditor((prev) => ({ ...prev, title: e.target.value })), placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsxs("div", { style: {
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "0.5rem",
+                                                flexShrink: 0,
+                                                marginBottom: "0.35rem"
+                                            }, children: [_jsx("button", { type: "button", className: voiceListening ? "btn secondary" : "btn ghost", style: voiceListening
+                                                        ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
+                                                        : undefined, disabled: !voiceSupported, onClick: toggleVoiceInput, title: !voiceSupported
+                                                        ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
+                                                        : voiceListening
+                                                            ? "Остановить запись"
+                                                            : "Диктовать текст в позицию курсора", children: voiceListening ? "⏹ Остановить диктовку" : "🎤 Голосовой ввод" }), voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#6b7280" }, children: "\u0413\u043E\u0432\u043E\u0440\u0438\u0442\u0435\u2026" }))] }), _jsx("textarea", { ref: contentTextareaRef, value: editor.content, onChange: (e) => setEditor((prev) => ({ ...prev, content: e.target.value })), onMouseUp: (e) => {
                                                 const textarea = e.target;
                                                 const start = textarea.selectionStart;
                                                 const end = textarea.selectionEnd;
