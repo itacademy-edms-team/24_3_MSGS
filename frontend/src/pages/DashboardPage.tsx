@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,6 +15,7 @@ import { api } from "../services/api";
 import type { Folder, Note, Message } from "../types";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
+import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
 
 type FolderFormState = {
   name: string;
@@ -39,6 +48,8 @@ export default function DashboardPage() {
   const [commentInput, setCommentInput] = useState("");
   const [showComments, setShowComments] = useState(false);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const loadedNoteIdRef = useRef<number | null>(null);
   const savedSnapshotRef = useRef<{ title: string; content: string }>({ title: "", content: "" });
   const editorRef = useRef(emptyEditor);
@@ -283,6 +294,69 @@ export default function DashboardPage() {
     return folders.find((f) => f.id === folderId)?.name ?? "Без папки";
   };
 
+  const handleExportCurrentMd = () => {
+    if (!selectedNote) return;
+    const title = editor.title || "Без названия";
+    downloadMarkdownFile(title, editor.content);
+  };
+
+  const handleExportFilteredMd = () => {
+    if (!filteredNotes.length) {
+      showStatus("Нет заметок для экспорта", 3000);
+      return;
+    }
+    filteredNotes.forEach((note, i) => {
+      const isOpen = note.id === selectedNoteId;
+      const title = isOpen ? editor.title || note.title : note.title;
+      const content = isOpen ? editor.content : note.content;
+      window.setTimeout(() => {
+        downloadMarkdownFile(title || "Без названия", content, { uniqueId: note.id });
+      }, i * 250);
+    });
+    showStatus(`Скачивается ${filteredNotes.length} файл(ов)…`, 4000);
+  };
+
+  const handleImportMd = async (e: ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const picked = input.files ? Array.from(input.files) : [];
+    input.value = "";
+    if (!picked.length || !token) return;
+    setImporting(true);
+    try {
+      let ok = 0;
+      for (const file of picked) {
+        const lower = file.name.toLowerCase();
+        if (
+          lower &&
+          !lower.endsWith(".md") &&
+          !lower.endsWith(".markdown")
+        ) {
+          continue;
+        }
+        try {
+          const raw = await file.text();
+          const { title, content } = parseMarkdownImport(raw, file.name);
+          const newNote = await api.createNote(token, {
+            title: title || "Без названия",
+            content,
+            folderId: selectedFolderId
+          });
+          setNotes((prev) => [newNote, ...prev]);
+          ok++;
+        } catch (err) {
+          handleError(err);
+        }
+      }
+      if (ok > 0) {
+        showStatus(`Импортировано заметок: ${ok}`);
+      } else {
+        showStatus("Не выбраны файлы .md", 4000);
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const appendTranscriptToContent = useCallback((text: string) => {
     setEditor((prev) => {
       const ta = contentTextareaRef.current;
@@ -421,11 +495,37 @@ export default function DashboardPage() {
           </div>
           <div className="panel-actions">
             <input
+              ref={importInputRef}
+              type="file"
+              accept=".md,.markdown,text/markdown,text/plain"
+              multiple
+              style={{ display: "none" }}
+              onChange={handleImportMd}
+            />
+            <input
               type="search"
               placeholder="Поиск..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={importing || saving || !token}
+              onClick={() => importInputRef.current?.click()}
+              title="Импорт одного или нескольких .md в текущую папку"
+            >
+              {importing ? "Импорт…" : "Импорт .md"}
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={!filteredNotes.length}
+              onClick={handleExportFilteredMd}
+              title="Скачать каждую заметку из списка отдельным .md"
+            >
+              Экспорт списка
+            </button>
             <button className="btn primary" onClick={handleCreateNote} disabled={saving}>
               + Новая заметка
             </button>
@@ -474,6 +574,14 @@ export default function DashboardPage() {
                 <span style={{ fontSize: "0.75rem", color: "#667085" }}>
                   Автосохранение ~{AUTOSAVE_DEBOUNCE_MS / 1000} с после паузы
                 </span>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={handleExportCurrentMd}
+                  title="Скачать эту заметку как файл Markdown"
+                >
+                  Скачать .md
+                </button>
                 <button
                   className="btn secondary"
                   onClick={() => setShowComments(!showComments)}

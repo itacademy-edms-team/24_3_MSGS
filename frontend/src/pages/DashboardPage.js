@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { api } from "../services/api";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
+import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
 const emptyEditor = { title: "", content: "" };
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 export default function DashboardPage() {
@@ -31,6 +32,8 @@ export default function DashboardPage() {
     const [commentInput, setCommentInput] = useState("");
     const [showComments, setShowComments] = useState(false);
     const contentTextareaRef = useRef(null);
+    const importInputRef = useRef(null);
+    const [importing, setImporting] = useState(false);
     const loadedNoteIdRef = useRef(null);
     const savedSnapshotRef = useRef({ title: "", content: "" });
     const editorRef = useRef(emptyEditor);
@@ -259,6 +262,69 @@ export default function DashboardPage() {
             return "Без папки";
         return folders.find((f) => f.id === folderId)?.name ?? "Без папки";
     };
+    const handleExportCurrentMd = () => {
+        if (!selectedNote)
+            return;
+        const title = editor.title || "Без названия";
+        downloadMarkdownFile(title, editor.content);
+    };
+    const handleExportFilteredMd = () => {
+        if (!filteredNotes.length) {
+            showStatus("Нет заметок для экспорта", 3000);
+            return;
+        }
+        filteredNotes.forEach((note, i) => {
+            const isOpen = note.id === selectedNoteId;
+            const title = isOpen ? editor.title || note.title : note.title;
+            const content = isOpen ? editor.content : note.content;
+            window.setTimeout(() => {
+                downloadMarkdownFile(title || "Без названия", content, { uniqueId: note.id });
+            }, i * 250);
+        });
+        showStatus(`Скачивается ${filteredNotes.length} файл(ов)…`, 4000);
+    };
+    const handleImportMd = async (e) => {
+        const input = e.target;
+        const picked = input.files ? Array.from(input.files) : [];
+        input.value = "";
+        if (!picked.length || !token)
+            return;
+        setImporting(true);
+        try {
+            let ok = 0;
+            for (const file of picked) {
+                const lower = file.name.toLowerCase();
+                if (lower &&
+                    !lower.endsWith(".md") &&
+                    !lower.endsWith(".markdown")) {
+                    continue;
+                }
+                try {
+                    const raw = await file.text();
+                    const { title, content } = parseMarkdownImport(raw, file.name);
+                    const newNote = await api.createNote(token, {
+                        title: title || "Без названия",
+                        content,
+                        folderId: selectedFolderId
+                    });
+                    setNotes((prev) => [newNote, ...prev]);
+                    ok++;
+                }
+                catch (err) {
+                    handleError(err);
+                }
+            }
+            if (ok > 0) {
+                showStatus(`Импортировано заметок: ${ok}`);
+            }
+            else {
+                showStatus("Не выбраны файлы .md", 4000);
+            }
+        }
+        finally {
+            setImporting(false);
+        }
+    };
     const appendTranscriptToContent = useCallback((text) => {
         setEditor((prev) => {
             const ta = contentTextareaRef.current;
@@ -312,10 +378,10 @@ export default function DashboardPage() {
     return (_jsxs("div", { className: "dashboard", children: [_jsxs("aside", { className: "sidebar", children: [_jsx(AppSidebarNav, {}), _jsxs("div", { className: "sidebar-section", children: [_jsxs("div", { className: "section-header", children: [_jsx("h3", { children: "\u041F\u0430\u043F\u043A\u0438" }), _jsx("span", { className: "badge", children: folders.length })] }), _jsxs("form", { className: "folder-form", onSubmit: handleCreateFolder, children: [_jsx("input", { type: "text", placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u043F\u0430\u043F\u043A\u0438", value: folderForm.name, onChange: (e) => setFolderForm((prev) => ({ ...prev, name: e.target.value })), required: true }), _jsxs("select", { value: folderForm.parentId, onChange: (e) => setFolderForm((prev) => ({ ...prev, parentId: e.target.value })), children: [_jsx("option", { value: "", children: "\u041A\u043E\u0440\u043D\u0435\u0432\u0430\u044F \u043F\u0430\u043F\u043A\u0430" }), folders.map((folder) => (_jsx("option", { value: folder.id, children: folder.name }, folder.id)))] }), _jsx("button", { type: "submit", className: "btn secondary", children: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C" })] }), _jsxs("ul", { className: "folder-list", children: [_jsxs("li", { className: !selectedFolderId ? "active" : "", onClick: () => setSelectedFolderId(null), children: [_jsx("span", { children: "\u0412\u0441\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsx("span", { className: "badge light", children: notes.length })] }), folders.map((folder) => (_jsxs("li", { className: selectedFolderId === folder.id ? "active" : "", onClick: () => setSelectedFolderId(folder.id), children: [_jsx("span", { children: folder.name }), _jsxs("div", { className: "folder-meta", children: [_jsx("span", { className: "badge light", children: notes.filter((note) => note.folderId === folder.id).length }), _jsx("button", { className: "icon-btn", type: "button", onClick: (e) => {
                                                             e.stopPropagation();
                                                             handleDeleteFolder(folder.id);
-                                                        }, children: "\u00D7" })] })] }, folder.id)))] })] })] }), _jsxs("section", { className: "notes-panel", children: [_jsxs("header", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: selectedFolderId ? folderName(selectedFolderId) : "Все заметки" }), _jsxs("p", { children: [filteredNotes.length, " \u0437\u0430\u043C\u0435\u0442\u043E\u043A"] })] }), _jsxs("div", { className: "panel-actions", children: [_jsx("input", { type: "search", placeholder: "\u041F\u043E\u0438\u0441\u043A...", value: search, onChange: (e) => setSearch(e.target.value) }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, disabled: saving, children: "+ \u041D\u043E\u0432\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430" })] })] }), _jsxs("ul", { className: "notes-list", children: [filteredNotes.map((note) => (_jsxs("li", { className: selectedNoteId === note.id ? "active" : "", onClick: () => handleSelectNote(note.id), children: [_jsxs("div", { children: [_jsx("p", { className: "note-title", children: note.title || "Без названия" }), _jsxs("p", { className: "note-meta", children: [new Date(note.updatedAt).toLocaleString(), " \u2022 ", folderName(note.folderId ?? null)] })] }), _jsx("button", { className: "icon-btn", onClick: (e) => {
+                                                        }, children: "\u00D7" })] })] }, folder.id)))] })] })] }), _jsxs("section", { className: "notes-panel", children: [_jsxs("header", { className: "panel-header", children: [_jsxs("div", { children: [_jsx("h2", { children: selectedFolderId ? folderName(selectedFolderId) : "Все заметки" }), _jsxs("p", { children: [filteredNotes.length, " \u0437\u0430\u043C\u0435\u0442\u043E\u043A"] })] }), _jsxs("div", { className: "panel-actions", children: [_jsx("input", { ref: importInputRef, type: "file", accept: ".md,.markdown,text/markdown,text/plain", multiple: true, style: { display: "none" }, onChange: handleImportMd }), _jsx("input", { type: "search", placeholder: "\u041F\u043E\u0438\u0441\u043A...", value: search, onChange: (e) => setSearch(e.target.value) }), _jsx("button", { type: "button", className: "btn ghost", disabled: importing || saving || !token, onClick: () => importInputRef.current?.click(), title: "\u0418\u043C\u043F\u043E\u0440\u0442 \u043E\u0434\u043D\u043E\u0433\u043E \u0438\u043B\u0438 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u0445 .md \u0432 \u0442\u0435\u043A\u0443\u0449\u0443\u044E \u043F\u0430\u043F\u043A\u0443", children: importing ? "Импорт…" : "Импорт .md" }), _jsx("button", { type: "button", className: "btn ghost", disabled: !filteredNotes.length, onClick: handleExportFilteredMd, title: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043A\u0430\u0436\u0434\u0443\u044E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u043C .md", children: "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u0441\u043F\u0438\u0441\u043A\u0430" }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, disabled: saving, children: "+ \u041D\u043E\u0432\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430" })] })] }), _jsxs("ul", { className: "notes-list", children: [filteredNotes.map((note) => (_jsxs("li", { className: selectedNoteId === note.id ? "active" : "", onClick: () => handleSelectNote(note.id), children: [_jsxs("div", { children: [_jsx("p", { className: "note-title", children: note.title || "Без названия" }), _jsxs("p", { className: "note-meta", children: [new Date(note.updatedAt).toLocaleString(), " \u2022 ", folderName(note.folderId ?? null)] })] }), _jsx("button", { className: "icon-btn", onClick: (e) => {
                                             e.stopPropagation();
                                             handleDeleteNote(note.id);
-                                        }, children: "\u00D7" })] }, note.id))), !filteredNotes.length && _jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0432 \u044D\u0442\u043E\u0439 \u043F\u0430\u043F\u043A\u0435" })] })] }), _jsx("section", { className: "editor-panel", children: selectedNote ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header spaced", children: [_jsx("input", { type: "text", value: editor.title, onChange: (e) => setEditor((prev) => ({ ...prev, title: e.target.value })), placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }, children: [_jsxs("span", { style: { fontSize: "0.75rem", color: "#667085" }, children: ["\u0410\u0432\u0442\u043E\u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 ~", AUTOSAVE_DEBOUNCE_MS / 1000, " \u0441 \u043F\u043E\u0441\u043B\u0435 \u043F\u0430\u0443\u0437\u044B"] }), _jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsxs("div", { style: {
+                                        }, children: "\u00D7" })] }, note.id))), !filteredNotes.length && _jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0432 \u044D\u0442\u043E\u0439 \u043F\u0430\u043F\u043A\u0435" })] })] }), _jsx("section", { className: "editor-panel", children: selectedNote ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header spaced", children: [_jsx("input", { type: "text", value: editor.title, onChange: (e) => setEditor((prev) => ({ ...prev, title: e.target.value })), placeholder: "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0438" }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }, children: [_jsxs("span", { style: { fontSize: "0.75rem", color: "#667085" }, children: ["\u0410\u0432\u0442\u043E\u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 ~", AUTOSAVE_DEBOUNCE_MS / 1000, " \u0441 \u043F\u043E\u0441\u043B\u0435 \u043F\u0430\u0443\u0437\u044B"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: handleExportCurrentMd, title: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u044D\u0442\u0443 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u043A\u0430\u043A \u0444\u0430\u0439\u043B Markdown", children: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C .md" }), _jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsxs("div", { style: {
                                                 display: "flex",
                                                 alignItems: "center",
                                                 gap: "0.5rem",
