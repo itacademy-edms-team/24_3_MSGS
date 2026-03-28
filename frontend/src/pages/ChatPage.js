@@ -1,27 +1,14 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import AppSidebarNav from "../components/AppSidebarNav";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import * as SignalR from "@microsoft/signalr";
 import { useAuth } from "../auth/AuthContext";
-import { api, HUB_BASE_URL } from "../services/api";
-/** Нормализует сообщение с бэкенда (PascalCase или camelCase) в тип Message */
-function normalizeMessage(msg) {
-    return {
-        id: (msg.id ?? msg.Id),
-        content: (msg.content ?? msg.Content),
-        sentAt: (msg.sentAt ?? msg.SentAt),
-        userId: (msg.userId ?? msg.UserId),
-        username: (msg.username ?? msg.Username),
-        conversationId: (msg.conversationId ?? msg.ConversationId),
-        noteId: (msg.noteId ?? msg.NoteId),
-        selectionStart: (msg.selectionStart ?? msg.SelectionStart),
-        selectionEnd: (msg.selectionEnd ?? msg.SelectionEnd)
-    };
-}
+import { useChatHub } from "../chat/ChatHubContext";
+import { api } from "../services/api";
 export default function ChatPage() {
     const { user, token } = useAuth();
+    const { hubConnected, hubError, setActiveConversationId, setIncomingMessageHandler, setRefreshConversationsHandler, syncConversationGroups, pendingOpenConversationId, clearPendingOpenConversation } = useChatHub();
     const [conversations, setConversations] = useState([]);
     const [friends, setFriends] = useState([]);
     const [selectedConversationId, setSelectedConversationId] = useState(null);
@@ -40,21 +27,11 @@ export default function ChatPage() {
     const [selectedText, setSelectedText] = useState(null);
     const [commentInput, setCommentInput] = useState("");
     const [expandedComments, setExpandedComments] = useState(new Set());
-    const [hubConnected, setHubConnected] = useState(false);
-    const [hubError, setHubError] = useState(null);
-    const [notifications, setNotifications] = useState([]);
     const messagesEndRef = useRef(null);
+    const messagesScrollRef = useRef(null);
     const userRef = useRef(user?.id);
     userRef.current = user?.id;
-    const connectionRef = useRef(null);
-    const selectedConvRef = useRef(null);
-    const prevConversationIdRef = useRef(null);
-    const loadConversationsRef = useRef(null);
-    const joinedConversationIdsRef = useRef(new Set());
-    const tokenRef = useRef(null);
     const notePreviewRef = useRef(null);
-    tokenRef.current = token ?? null;
-    selectedConvRef.current = selectedConversationId;
     /** Прокрутить заметку к месту выделенного текста (для комментария) и подсветить */
     const scrollToSelectionInNote = useCallback((selectionStart, selectionEnd) => {
         const container = notePreviewRef.current;
@@ -110,12 +87,37 @@ export default function ChatPage() {
     }, [selectedNote?.content]);
     const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
     const totalUnread = conversations.reduce((s, c) => s + (c.unreadCount ?? 0), 0);
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
+    /** Прокрутка после отрисовки списка (важно при открытии чата с другой вкладки: overflow-контейнер уже в DOM) */
+    useLayoutEffect(() => {
+        if (!selectedConversationId || messages.length === 0)
+            return;
+        let cancelled = false;
+        const run = () => {
+            if (cancelled)
+                return;
+            const wrap = messagesScrollRef.current;
+            if (wrap) {
+                wrap.scrollTop = wrap.scrollHeight;
+            }
+            else {
+                messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+            }
+        };
+        run();
+        const id1 = requestAnimationFrame(() => {
+            if (cancelled)
+                return;
+            run();
+            requestAnimationFrame(() => {
+                if (!cancelled)
+                    run();
+            });
+        });
+        return () => {
+            cancelled = true;
+            cancelAnimationFrame(id1);
+        };
+    }, [messages, selectedConversationId]);
     const showStatus = (message, timeout = 4000) => {
         setStatus(message);
         if (timeout > 0) {
@@ -133,7 +135,6 @@ export default function ChatPage() {
             showStatus(error instanceof Error ? error.message : "Ошибка загрузки чатов", 6000);
         }
     }, [token]);
-    loadConversationsRef.current = loadConversations;
     const loadFriends = useCallback(async () => {
         if (!token)
             return;
@@ -179,101 +180,30 @@ export default function ChatPage() {
             // Игнорируем ошибки
         }
     }, [token]);
-    // Подключение SignalR для обновления чата в реальном времени
     useEffect(() => {
-        if (!token)
+        setRefreshConversationsHandler(loadConversations);
+        return () => setRefreshConversationsHandler(null);
+    }, [loadConversations, setRefreshConversationsHandler]);
+    useEffect(() => {
+        setIncomingMessageHandler((msg) => {
+            setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        });
+        return () => setIncomingMessageHandler(null);
+    }, [setIncomingMessageHandler]);
+    useEffect(() => {
+        setActiveConversationId(selectedConversationId);
+        return () => setActiveConversationId(null);
+    }, [selectedConversationId, setActiveConversationId]);
+    useEffect(() => {
+        syncConversationGroups(conversations.map((c) => c.id));
+    }, [conversations, syncConversationGroups]);
+    useEffect(() => {
+        if (pendingOpenConversationId == null)
             return;
-        setHubError(null);
-        const url = `${HUB_BASE_URL}/hubs/chat`;
-        console.log("[SignalR] Подключение к:", url);
-        const connection = new SignalR.HubConnectionBuilder()
-            .withUrl(url, { accessTokenFactory: () => token })
-            .withAutomaticReconnect()
-            .build();
-        connection.on("ReceiveMessage", (msg) => {
-            const normalized = normalizeMessage(msg);
-            const currentConvId = selectedConvRef.current;
-            const isCurrentChat = normalized.conversationId === currentConvId;
-            const isFromOther = normalized.userId !== userRef.current;
-            if (isCurrentChat) {
-                setMessages((prev) => prev.some((m) => m.id === normalized.id) ? prev : [...prev, normalized]);
-                if (normalized.conversationId != null && tokenRef.current) {
-                    api.markConversationRead(tokenRef.current, normalized.conversationId, normalized.id).then(() => loadConversationsRef.current?.());
-                }
-            }
-            else if (isFromOther && normalized.conversationId != null) {
-                const notif = {
-                    id: `msg-${normalized.id}-${Date.now()}`,
-                    conversationId: normalized.conversationId,
-                    username: normalized.username,
-                    content: normalized.noteId ? "Поделился заметкой" : normalized.content,
-                    sentAt: normalized.sentAt,
-                    noteId: normalized.noteId ?? undefined
-                };
-                setNotifications((prev) => [...prev.slice(-4), notif]);
-                setTimeout(() => {
-                    setNotifications((n) => n.filter((x) => x.id !== notif.id));
-                }, 5000);
-            }
-            loadConversationsRef.current?.();
-        });
-        const updateConnected = () => {
-            setHubConnected(connection.state === SignalR.HubConnectionState.Connected);
-            if (connection.state === SignalR.HubConnectionState.Disconnected) {
-                setHubError(null); // очищаем при разрыве, чтобы не путать с первой ошибкой
-            }
-        };
-        connection.onclose(updateConnected);
-        connection.onreconnecting(updateConnected);
-        connection.onreconnected(updateConnected);
-        // После переподключения снова вступаем во все чаты
-        connection.onreconnected(() => {
-            const ids = Array.from(joinedConversationIdsRef.current);
-            ids.forEach((id) => connection.invoke("JoinConversation", id).catch(() => { }));
-        });
-        connection
-            .start()
-            .then(() => {
-            setHubConnected(true);
-            setHubError(null);
-            // Подписку на все чаты делаем в отдельном эффекте после загрузки списка
-        })
-            .catch((err) => {
-            const message = err?.message ?? String(err);
-            setHubError(message);
-            console.error("[SignalR] Ошибка подключения:", message, "\nURL:", url, "\nПолная ошибка:", err);
-        });
-        connectionRef.current = connection;
-        prevConversationIdRef.current = selectedConversationId;
-        return () => {
-            connection.off("ReceiveMessage");
-            connection.onclose(() => { });
-            connection.onreconnecting(() => { });
-            connection.onreconnected(() => { });
-            setHubConnected(false);
-            setHubError(null);
-            joinedConversationIdsRef.current = new Set();
-            connection.stop().catch(() => { });
-            connectionRef.current = null;
-            prevConversationIdRef.current = null;
-        };
-    }, [token]);
-    // Подписываемся на все чаты пользователя, чтобы получать сообщения и показывать пуш
-    useEffect(() => {
-        const conn = connectionRef.current;
-        if (!conn || !hubConnected || conversations.length === 0)
-            return;
-        conversations.forEach((c) => {
-            if (joinedConversationIdsRef.current.has(c.id))
-                return;
-            joinedConversationIdsRef.current = new Set([...joinedConversationIdsRef.current, c.id]);
-            conn.invoke("JoinConversation", c.id).catch(() => { });
-        });
-    }, [hubConnected, conversations]);
-    // При смене выбранного чата только обновляем ref (все группы уже подключены)
-    useEffect(() => {
-        prevConversationIdRef.current = selectedConversationId;
-    }, [selectedConversationId]);
+        const id = pendingOpenConversationId;
+        clearPendingOpenConversation();
+        setSelectedConversationId(id);
+    }, [pendingOpenConversationId, clearPendingOpenConversation]);
     useEffect(() => {
         setLoading(true);
         Promise.all([loadConversations(), loadFriends()])
@@ -289,7 +219,7 @@ export default function ChatPage() {
         const markReadAndRefresh = (lastMessageId) => {
             api
                 .markConversationRead(token, selectedConversationId, lastMessageId)
-                .then(() => loadConversationsRef.current?.());
+                .then(() => loadConversations());
         };
         api
             .getConversation(token, selectedConversationId)
@@ -299,7 +229,7 @@ export default function ChatPage() {
         })
             .catch(() => markReadAndRefresh(0));
         loadMessages(selectedConversationId);
-    }, [selectedConversationId, token]);
+    }, [selectedConversationId, token, loadConversations, loadMessages]);
     useEffect(() => {
         if (showShareNotes) {
             Promise.all([loadNotes(), loadFolders()]);
@@ -308,11 +238,6 @@ export default function ChatPage() {
     const handleSelectConversation = (conversationId) => {
         setSelectedConversationId(conversationId);
         setShowShareNotes(false);
-    };
-    const dismissNotification = (id, conversationId) => {
-        setNotifications((n) => n.filter((x) => x.id !== id));
-        if (conversationId != null)
-            setSelectedConversationId(conversationId);
     };
     const handleStartConversation = async (friendId) => {
         if (!token)
@@ -345,7 +270,7 @@ export default function ChatPage() {
             // Тот же механизм, что при открытии чата: отмечаем прочитанным до последнего сообщения и обновляем список
             api
                 .markConversationRead(token, selectedConversationId, message.id)
-                .then(() => loadConversationsRef.current?.())
+                .then(() => loadConversations())
                 .catch(() => loadConversations());
         }
         catch (error) {
@@ -464,7 +389,7 @@ export default function ChatPage() {
                                             return (_jsxs("div", { style: { marginBottom: "1rem" }, children: [_jsxs("h4", { style: { marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }, children: ["\uD83D\uDCC1 ", folder.name] }), _jsx("ul", { className: "notes-list", children: folderNotes.map((note) => (_jsx("li", { onClick: () => handleShareNote(note.id), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] }, folder.id));
                                         }), notes.filter((n) => !n.folderId).length > 0 && (_jsxs("div", { style: { marginBottom: "1rem" }, children: [_jsx("h4", { style: { marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }, children: "\uD83D\uDCC1 \u0411\u0435\u0437 \u043F\u0430\u043F\u043A\u0438" }), _jsx("ul", { className: "notes-list", children: notes
                                                         .filter((n) => !n.folderId)
-                                                        .map((note) => (_jsx("li", { onClick: () => handleShareNote(note.id), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] })), notes.length === 0 && (_jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438" }))] })), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1rem" }, children: [messages.map((message) => {
+                                                        .map((note) => (_jsx("li", { onClick: () => handleShareNote(note.id), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] })), notes.length === 0 && (_jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438" }))] })), _jsxs("div", { ref: messagesScrollRef, style: { flex: 1, overflowY: "auto", padding: "1rem" }, children: [messages.map((message) => {
                                             const handleNoteClick = async () => {
                                                 if (!token || !message.noteId) {
                                                     console.log("Нет token или noteId", { token: !!token, noteId: message.noteId });
@@ -651,31 +576,5 @@ export default function ChatPage() {
                                                                         }
                                                                         setExpandedComments(newExpanded);
                                                                     }, style: { fontSize: "0.75rem", padding: "0.25rem 0.5rem" }, children: isExpanded ? "Свернуть" : "Развернуть" }))] }), hasSelection && isExpanded && selectedText && (_jsxs("div", { style: { marginBottom: "0.5rem", padding: "0.5rem", background: "#fff", borderRadius: "4px", border: "1px solid #e5e7eb" }, children: [_jsx("p", { style: { margin: 0, fontSize: "0.75rem", color: "#6b7280", marginBottom: "0.25rem" }, children: "\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043A \u0442\u0435\u043A\u0441\u0442\u0443:" }), _jsxs("p", { style: { margin: 0, fontStyle: "italic", color: "#4c3df7" }, children: ["\"", selectedText, "\""] })] })), _jsx("p", { style: { margin: 0 }, children: comment.content })] }, comment.id));
-                                            })] }))] })] }))] }), status && (_jsx("div", { className: "toast", children: _jsx("span", { children: status }) })), _jsx("div", { className: "chat-notifications", style: {
-                    position: "fixed",
-                    bottom: "1rem",
-                    left: "1rem",
-                    zIndex: 10000,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "0.5rem",
-                    maxWidth: "320px"
-                }, children: notifications.map((n) => (_jsxs("button", { type: "button", onClick: () => dismissNotification(n.id, n.conversationId), style: {
-                        display: "block",
-                        textAlign: "left",
-                        width: "100%",
-                        padding: "0.75rem 1rem",
-                        background: "#fff",
-                        border: "1px solid #e5e7eb",
-                        borderRadius: "12px",
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-                        cursor: "pointer",
-                        transition: "transform 0.15s ease, box-shadow 0.15s ease"
-                    }, onMouseEnter: (e) => {
-                        e.currentTarget.style.transform = "translateX(4px)";
-                        e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.15)";
-                    }, onMouseLeave: (e) => {
-                        e.currentTarget.style.transform = "translateX(0)";
-                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.12)";
-                    }, children: [_jsx("div", { style: { fontSize: "0.8rem", fontWeight: 600, color: "#4c3df7", marginBottom: "0.25rem" }, children: n.username }), _jsx("div", { style: { fontSize: "0.85rem", color: "#374151", lineHeight: 1.3 }, children: n.content.length > 60 ? `${n.content.slice(0, 60)}…` : n.content }), _jsx("div", { style: { fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.25rem" }, children: new Date(n.sentAt).toLocaleTimeString() })] }, n.id))) })] }));
+                                            })] }))] })] }))] }), status && (_jsx("div", { className: "toast", children: _jsx("span", { children: status }) }))] }));
 }

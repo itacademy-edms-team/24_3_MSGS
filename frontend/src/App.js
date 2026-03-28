@@ -1,6 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { ChatHubProvider } from "./chat/ChatHubContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -18,5 +19,5 @@ const ProtectedRoute = ({ children }) => {
 };
 const AppRoutes = () => (_jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsx(Route, { path: "/app", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/friends", element: _jsx(ProtectedRoute, { children: _jsx(FriendsPage, {}) }) }), _jsx(Route, { path: "/chat", element: _jsx(ProtectedRoute, { children: _jsx(ChatPage, {}) }) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/app", replace: true }) })] }));
 export default function App() {
-    return (_jsx(AuthProvider, { children: _jsx(BrowserRouter, { children: _jsx(AppRoutes, {}) }) }));
+    return (_jsx(AuthProvider, { children: _jsx(BrowserRouter, { children: _jsx(ChatHubProvider, { children: _jsx(AppRoutes, {}) }) }) }));
 }

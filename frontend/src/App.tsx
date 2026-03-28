@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { ChatHubProvider } from "./chat/ChatHubContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -62,7 +63,9 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <ChatHubProvider>
+          <AppRoutes />
+        </ChatHubProvider>
       </BrowserRouter>
     </AuthProvider>
   );

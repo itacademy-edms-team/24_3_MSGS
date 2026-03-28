@@ -1,38 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import AppSidebarNav from "../components/AppSidebarNav";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import * as SignalR from "@microsoft/signalr";
 import { useAuth } from "../auth/AuthContext";
-import { api, HUB_BASE_URL } from "../services/api";
+import { useChatHub } from "../chat/ChatHubContext";
+import { api } from "../services/api";
 import type { Conversation, Message, Note, Folder, User } from "../types";
-
-/** Нормализует сообщение с бэкенда (PascalCase или camelCase) в тип Message */
-function normalizeMessage(msg: Record<string, unknown>): Message {
-  return {
-    id: (msg.id ?? msg.Id) as number,
-    content: (msg.content ?? msg.Content) as string,
-    sentAt: (msg.sentAt ?? msg.SentAt) as string,
-    userId: (msg.userId ?? msg.UserId) as number,
-    username: (msg.username ?? msg.Username) as string,
-    conversationId: (msg.conversationId ?? msg.ConversationId) as number | null | undefined,
-    noteId: (msg.noteId ?? msg.NoteId) as number | null | undefined,
-    selectionStart: (msg.selectionStart ?? msg.SelectionStart) as number | null | undefined,
-    selectionEnd: (msg.selectionEnd ?? msg.SelectionEnd) as number | null | undefined
-  };
-}
-
-type ChatNotification = {
-  id: string;
-  conversationId: number;
-  username: string;
-  content: string;
-  sentAt: string;
-  noteId?: number;
-};
 
 export default function ChatPage() {
   const { user, token } = useAuth();
+  const {
+    hubConnected,
+    hubError,
+    setActiveConversationId,
+    setIncomingMessageHandler,
+    setRefreshConversationsHandler,
+    syncConversationGroups,
+    pendingOpenConversationId,
+    clearPendingOpenConversation
+  } = useChatHub();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [friends, setFriends] = useState<User[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
@@ -51,21 +37,11 @@ export default function ChatPage() {
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
-  const [hubConnected, setHubConnected] = useState(false);
-  const [hubError, setHubError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<ChatNotification[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<number | undefined>(user?.id);
   userRef.current = user?.id;
-  const connectionRef = useRef<SignalR.HubConnection | null>(null);
-  const selectedConvRef = useRef<number | null>(null);
-  const prevConversationIdRef = useRef<number | null>(null);
-  const loadConversationsRef = useRef<( () => Promise<void>) | null>(null);
-  const joinedConversationIdsRef = useRef<Set<number>>(new Set());
-  const tokenRef = useRef<string | null>(null);
   const notePreviewRef = useRef<HTMLDivElement | null>(null);
-  tokenRef.current = token ?? null;
-  selectedConvRef.current = selectedConversationId;
 
   /** Прокрутить заметку к месту выделенного текста (для комментария) и подсветить */
   const scrollToSelectionInNote = useCallback(
@@ -122,13 +98,32 @@ export default function ChatPage() {
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId);
   const totalUnread = conversations.reduce((s, c) => s + (c.unreadCount ?? 0), 0);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  /** Прокрутка после отрисовки списка (важно при открытии чата с другой вкладки: overflow-контейнер уже в DOM) */
+  useLayoutEffect(() => {
+    if (!selectedConversationId || messages.length === 0) return;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      const wrap = messagesScrollRef.current;
+      if (wrap) {
+        wrap.scrollTop = wrap.scrollHeight;
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      }
+    };
+    run();
+    const id1 = requestAnimationFrame(() => {
+      if (cancelled) return;
+      run();
+      requestAnimationFrame(() => {
+        if (!cancelled) run();
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id1);
+    };
+  }, [messages, selectedConversationId]);
 
   const showStatus = (message: string, timeout = 4000) => {
     setStatus(message);
@@ -149,7 +144,6 @@ export default function ChatPage() {
       );
     }
   }, [token]);
-  loadConversationsRef.current = loadConversations;
 
   const loadFriends = useCallback(async () => {
     if (!token) return;
@@ -195,110 +189,33 @@ export default function ChatPage() {
     }
   }, [token]);
 
-  // Подключение SignalR для обновления чата в реальном времени
   useEffect(() => {
-    if (!token) return;
-    setHubError(null);
-    const url = `${HUB_BASE_URL}/hubs/chat`;
-    console.log("[SignalR] Подключение к:", url);
-    const connection = new SignalR.HubConnectionBuilder()
-      .withUrl(url, { accessTokenFactory: () => token })
-      .withAutomaticReconnect()
-      .build();
+    setRefreshConversationsHandler(loadConversations);
+    return () => setRefreshConversationsHandler(null);
+  }, [loadConversations, setRefreshConversationsHandler]);
 
-    connection.on("ReceiveMessage", (msg: Record<string, unknown>) => {
-      const normalized = normalizeMessage(msg);
-      const currentConvId = selectedConvRef.current;
-      const isCurrentChat = normalized.conversationId === currentConvId;
-      const isFromOther = normalized.userId !== userRef.current;
-
-      if (isCurrentChat) {
-        setMessages((prev) =>
-          prev.some((m) => m.id === normalized.id) ? prev : [...prev, normalized]
-        );
-        if (normalized.conversationId != null && tokenRef.current) {
-          api.markConversationRead(tokenRef.current, normalized.conversationId, normalized.id).then(
-            () => loadConversationsRef.current?.()
-          );
-        }
-      } else if (isFromOther && normalized.conversationId != null) {
-        const notif: ChatNotification = {
-          id: `msg-${normalized.id}-${Date.now()}`,
-          conversationId: normalized.conversationId,
-          username: normalized.username,
-          content: normalized.noteId ? "Поделился заметкой" : normalized.content,
-          sentAt: normalized.sentAt,
-          noteId: normalized.noteId ?? undefined
-        };
-        setNotifications((prev) => [...prev.slice(-4), notif]);
-        setTimeout(() => {
-          setNotifications((n) => n.filter((x) => x.id !== notif.id));
-        }, 5000);
-      }
-      loadConversationsRef.current?.();
-    });
-
-    const updateConnected = () => {
-      setHubConnected(connection.state === SignalR.HubConnectionState.Connected);
-      if (connection.state === SignalR.HubConnectionState.Disconnected) {
-        setHubError(null); // очищаем при разрыве, чтобы не путать с первой ошибкой
-      }
-    };
-    connection.onclose(updateConnected);
-    connection.onreconnecting(updateConnected);
-    connection.onreconnected(updateConnected);
-
-    // После переподключения снова вступаем во все чаты
-    connection.onreconnected(() => {
-      const ids = Array.from(joinedConversationIdsRef.current);
-      ids.forEach((id) => connection.invoke("JoinConversation", id).catch(() => {}));
-    });
-
-    connection
-      .start()
-      .then(() => {
-        setHubConnected(true);
-        setHubError(null);
-        // Подписку на все чаты делаем в отдельном эффекте после загрузки списка
-      })
-      .catch((err) => {
-        const message = err?.message ?? String(err);
-        setHubError(message);
-        console.error("[SignalR] Ошибка подключения:", message, "\nURL:", url, "\nПолная ошибка:", err);
-      });
-
-    connectionRef.current = connection;
-    prevConversationIdRef.current = selectedConversationId;
-
-    return () => {
-      connection.off("ReceiveMessage");
-      connection.onclose(() => {});
-      connection.onreconnecting(() => {});
-      connection.onreconnected(() => {});
-      setHubConnected(false);
-      setHubError(null);
-      joinedConversationIdsRef.current = new Set();
-      connection.stop().catch(() => {});
-      connectionRef.current = null;
-      prevConversationIdRef.current = null;
-    };
-  }, [token]);
-
-  // Подписываемся на все чаты пользователя, чтобы получать сообщения и показывать пуш
   useEffect(() => {
-    const conn = connectionRef.current;
-    if (!conn || !hubConnected || conversations.length === 0) return;
-    conversations.forEach((c) => {
-      if (joinedConversationIdsRef.current.has(c.id)) return;
-      joinedConversationIdsRef.current = new Set([...joinedConversationIdsRef.current, c.id]);
-      conn.invoke("JoinConversation", c.id).catch(() => {});
+    setIncomingMessageHandler((msg) => {
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
     });
-  }, [hubConnected, conversations]);
+    return () => setIncomingMessageHandler(null);
+  }, [setIncomingMessageHandler]);
 
-  // При смене выбранного чата только обновляем ref (все группы уже подключены)
   useEffect(() => {
-    prevConversationIdRef.current = selectedConversationId;
-  }, [selectedConversationId]);
+    setActiveConversationId(selectedConversationId);
+    return () => setActiveConversationId(null);
+  }, [selectedConversationId, setActiveConversationId]);
+
+  useEffect(() => {
+    syncConversationGroups(conversations.map((c) => c.id));
+  }, [conversations, syncConversationGroups]);
+
+  useEffect(() => {
+    if (pendingOpenConversationId == null) return;
+    const id = pendingOpenConversationId;
+    clearPendingOpenConversation();
+    setSelectedConversationId(id);
+  }, [pendingOpenConversationId, clearPendingOpenConversation]);
 
   useEffect(() => {
     setLoading(true);
@@ -315,7 +232,7 @@ export default function ChatPage() {
     const markReadAndRefresh = (lastMessageId: number) => {
       api
         .markConversationRead(token!, selectedConversationId!, lastMessageId)
-        .then(() => loadConversationsRef.current?.());
+        .then(() => loadConversations());
     };
     api
       .getConversation(token, selectedConversationId)
@@ -325,7 +242,7 @@ export default function ChatPage() {
       })
       .catch(() => markReadAndRefresh(0));
     loadMessages(selectedConversationId);
-  }, [selectedConversationId, token]);
+  }, [selectedConversationId, token, loadConversations, loadMessages]);
 
   useEffect(() => {
     if (showShareNotes) {
@@ -336,11 +253,6 @@ export default function ChatPage() {
   const handleSelectConversation = (conversationId: number) => {
     setSelectedConversationId(conversationId);
     setShowShareNotes(false);
-  };
-
-  const dismissNotification = (id: string, conversationId?: number) => {
-    setNotifications((n) => n.filter((x) => x.id !== id));
-    if (conversationId != null) setSelectedConversationId(conversationId);
   };
 
   const handleStartConversation = async (friendId: number) => {
@@ -376,7 +288,7 @@ export default function ChatPage() {
       // Тот же механизм, что при открытии чата: отмечаем прочитанным до последнего сообщения и обновляем список
       api
         .markConversationRead(token, selectedConversationId, message.id)
-        .then(() => loadConversationsRef.current?.())
+        .then(() => loadConversations())
         .catch(() => loadConversations());
     } catch (error) {
       showStatus(
@@ -653,7 +565,7 @@ export default function ChatPage() {
               </div>
             )}
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
+            <div ref={messagesScrollRef} style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
               {messages.map((message) => {
                 const handleNoteClick = async () => {
                   if (!token || !message.noteId) {
@@ -1028,59 +940,6 @@ export default function ChatPage() {
           <span>{status}</span>
         </div>
       )}
-
-      {/* Пуш-уведомления о новых сообщениях — левый нижний угол */}
-      <div
-        className="chat-notifications"
-        style={{
-          position: "fixed",
-          bottom: "1rem",
-          left: "1rem",
-          zIndex: 10000,
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.5rem",
-          maxWidth: "320px"
-        }}
-      >
-        {notifications.map((n) => (
-          <button
-            key={n.id}
-            type="button"
-            onClick={() => dismissNotification(n.id, n.conversationId)}
-            style={{
-              display: "block",
-              textAlign: "left",
-              width: "100%",
-              padding: "0.75rem 1rem",
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-              cursor: "pointer",
-              transition: "transform 0.15s ease, box-shadow 0.15s ease"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateX(4px)";
-              e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.15)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateX(0)";
-              e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.12)";
-            }}
-          >
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "#4c3df7", marginBottom: "0.25rem" }}>
-              {n.username}
-            </div>
-            <div style={{ fontSize: "0.85rem", color: "#374151", lineHeight: 1.3 }}>
-              {n.content.length > 60 ? `${n.content.slice(0, 60)}…` : n.content}
-            </div>
-            <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.25rem" }}>
-              {new Date(n.sentAt).toLocaleTimeString()}
-            </div>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
