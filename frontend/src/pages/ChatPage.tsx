@@ -7,6 +7,11 @@ import { useChatHub } from "../chat/ChatHubContext";
 import { api } from "../services/api";
 import type { Conversation, Message, Note, Folder, User } from "../types";
 
+/** Экраны уже ~1145px ломают сетку чата — переключаемся на полноэкранные панели */
+const CHAT_NARROW_MAX_PX = 1144;
+
+type ChatMobilePane = "list" | "thread" | "note";
+
 export default function ChatPage() {
   const { user, token } = useAuth();
   const {
@@ -37,6 +42,14 @@ export default function ChatPage() {
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
+  const [isNarrowChat, setIsNarrowChat] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia(`(max-width: ${CHAT_NARROW_MAX_PX}px)`).matches
+  );
+  const [chatMobilePane, setChatMobilePane] = useState<ChatMobilePane>("list");
+  const isNarrowChatRef = useRef(false);
+  isNarrowChatRef.current = isNarrowChat;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<number | undefined>(user?.id);
@@ -190,6 +203,18 @@ export default function ChatPage() {
   }, [token]);
 
   useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${CHAT_NARROW_MAX_PX}px)`);
+    const apply = () => setIsNarrowChat(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (!isNarrowChat) setChatMobilePane("list");
+  }, [isNarrowChat]);
+
+  useEffect(() => {
     setRefreshConversationsHandler(loadConversations);
     return () => setRefreshConversationsHandler(null);
   }, [loadConversations, setRefreshConversationsHandler]);
@@ -215,6 +240,7 @@ export default function ChatPage() {
     const id = pendingOpenConversationId;
     clearPendingOpenConversation();
     setSelectedConversationId(id);
+    if (isNarrowChatRef.current) setChatMobilePane("thread");
   }, [pendingOpenConversationId, clearPendingOpenConversation]);
 
   useEffect(() => {
@@ -253,6 +279,7 @@ export default function ChatPage() {
   const handleSelectConversation = (conversationId: number) => {
     setSelectedConversationId(conversationId);
     setShowShareNotes(false);
+    if (isNarrowChat) setChatMobilePane("thread");
   };
 
   const handleStartConversation = async (friendId: number) => {
@@ -265,6 +292,7 @@ export default function ChatPage() {
         return [...prev, conversation];
       });
       setSelectedConversationId(conversation.id);
+      if (isNarrowChatRef.current) setChatMobilePane("thread");
     } catch (error) {
       showStatus(
         error instanceof Error ? error.message : "Ошибка создания чата",
@@ -330,6 +358,13 @@ export default function ChatPage() {
       : conversation.user1Username;
   };
 
+  const closeNotePanel = useCallback(() => {
+    setSelectedNote(null);
+    setSelectedText(null);
+    setCommentInput("");
+    if (isNarrowChatRef.current) setChatMobilePane("thread");
+  }, []);
+
   const loadComments = useCallback(async (noteId: number) => {
     if (!token) return;
     try {
@@ -382,9 +417,18 @@ export default function ChatPage() {
     );
   }
 
+  const sidebarHidden = isNarrowChat && chatMobilePane !== "list";
+  const mainGridHidden = isNarrowChat && chatMobilePane === "list";
+  const threadPanelHidden = isNarrowChat && chatMobilePane === "note";
+  const gridTemplateColumns = isNarrowChat
+    ? "1fr"
+    : selectedNote
+      ? "minmax(350px, 500px) 1fr"
+      : "1fr";
+
   return (
     <div className="dashboard chat-dashboard">
-      <aside className="sidebar">
+      <aside className={`sidebar chat-sidebar${sidebarHidden ? " chat-mobile-hidden" : ""}`}>
         <AppSidebarNav />
 
         <div className="sidebar-section">
@@ -455,27 +499,63 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: selectedNote ? "minmax(350px, 500px) 1fr" : "1fr", 
-        height: "100vh", 
-        gap: "0",
-        width: "100%",
-        overflow: "hidden"
-      }}>
-      <section className="editor-panel" style={{ 
-        display: "flex", 
-        flexDirection: "column", 
-        height: "100vh",
-        overflow: "hidden"
-      }}>
+      <div
+        className={`chat-content-grid${mainGridHidden ? " chat-mobile-hidden" : ""}`}
+        style={{
+          display: "grid",
+          gridTemplateColumns,
+          height: "100vh",
+          maxHeight: "100dvh",
+          gap: "0",
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          overflow: "hidden",
+          boxSizing: "border-box"
+        }}
+      >
+      <section
+        className={`editor-panel chat-thread-panel${threadPanelHidden ? " chat-mobile-hidden" : ""}`}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          maxHeight: "100dvh",
+          overflow: "hidden",
+          minWidth: 0,
+          boxSizing: "border-box"
+        }}
+      >
         {selectedConversation ? (
           <>
-            <header className="panel-header" style={{ flexWrap: "nowrap", minWidth: 0 }}>
+            <header
+              className="panel-header chat-thread-header"
+              style={{ flexWrap: isNarrowChat ? "wrap" : "nowrap", minWidth: 0, alignItems: "center" }}
+            >
+              {isNarrowChat && (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => setChatMobilePane("list")}
+                  style={{ flexShrink: 0 }}
+                >
+                  ← Чаты
+                </button>
+              )}
               <h2 style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {getOtherUser(selectedConversation)}
               </h2>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                  flexShrink: 0,
+                  flexWrap: "wrap",
+                  justifyContent: "flex-end",
+                  marginLeft: isNarrowChat ? 0 : undefined
+                }}
+              >
                 <span
                   data-chat-hub-status
                   style={{
@@ -502,10 +582,11 @@ export default function ChatPage() {
                   </span>
                 )}
                 <button
-                className="btn secondary"
-                onClick={() => setShowShareNotes(!showShareNotes)}
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => setShowShareNotes(!showShareNotes)}
                 >
-                  {showShareNotes ? "Скрыть" : "Поделиться файлами"}
+                  {showShareNotes ? "Скрыть" : isNarrowChat ? "Файлы" : "Поделиться файлами"}
                 </button>
               </div>
             </header>
@@ -568,18 +649,12 @@ export default function ChatPage() {
             <div ref={messagesScrollRef} style={{ flex: 1, overflowY: "auto", padding: "1rem" }}>
               {messages.map((message) => {
                 const handleNoteClick = async () => {
-                  if (!token || !message.noteId) {
-                    console.log("Нет token или noteId", { token: !!token, noteId: message.noteId });
-                    return;
-                  }
-                  console.log("=== КЛИК ПО ЗАМЕТКЕ ===", message.noteId, message);
+                  if (!token || !message.noteId) return;
                   setLoadingNote(true);
                   try {
                     const note = await api.getNote(token, message.noteId);
-                    console.log("Заметка загружена", note);
-                    console.log("Устанавливаем selectedNote:", note);
                     setSelectedNote(note);
-                    console.log("selectedNote установлен");
+                    if (isNarrowChatRef.current) setChatMobilePane("note");
                   } catch (error) {
                     console.error("Ошибка загрузки заметки", error);
                     showStatus(
@@ -607,7 +682,7 @@ export default function ChatPage() {
                         handleNoteClick();
                       } : undefined}
                       style={{
-                        maxWidth: "70%",
+                        maxWidth: isNarrowChat ? "min(92%, 100%)" : "70%",
                         padding: "0.75rem 1rem",
                         borderRadius: "12px",
                         background: message.userId === user?.id ? "#4c3df7" : "#e5e7eb",
@@ -691,34 +766,59 @@ export default function ChatPage() {
         </section>
 
         {selectedNote && (
-          <section style={{ 
-            background: "#fff", 
-            borderLeft: "1px solid #e5e7eb", 
-            display: "flex", 
-            flexDirection: "column", 
-            height: "100vh", 
-            overflow: "hidden",
-            minWidth: 0,
-            width: "100%"
-          }}>
-            <header className="panel-header" style={{ padding: "1rem", borderBottom: "1px solid #e5e7eb" }}>
-              <h2 style={{ margin: 0 }}>{selectedNote.title || "Без названия"}</h2>
-              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <section
+            className={`chat-note-panel${isNarrowChat && chatMobilePane !== "note" ? " chat-mobile-hidden" : ""}`}
+            style={{
+              background: "#fff",
+              borderLeft: isNarrowChat ? "none" : "1px solid #e5e7eb",
+              display: "flex",
+              flexDirection: "column",
+              height: "100vh",
+              maxHeight: "100dvh",
+              overflow: "hidden",
+              minWidth: 0,
+              width: "100%",
+              boxSizing: "border-box"
+            }}
+          >
+            <header
+              className="panel-header chat-thread-header"
+              style={{
+                padding: "1rem",
+                borderBottom: "1px solid #e5e7eb",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+                alignItems: "center"
+              }}
+            >
+              {isNarrowChat && (
                 <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={closeNotePanel}
+                  style={{ flexShrink: 0 }}
+                >
+                  ← К чату
+                </button>
+              )}
+              <h2 style={{ margin: 0, flex: 1, minWidth: "120px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {selectedNote.title || "Без названия"}
+              </h2>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
                   className="btn secondary"
                   onClick={() => setShowComments(!showComments)}
                   style={{ fontSize: "0.9rem" }}
                 >
-                  {showComments ? "Скрыть" : "Показать"} комментарии ({comments.length})
+                  {showComments ? "Скрыть" : "Показать"} ({comments.length})
                 </button>
                 <button
+                  type="button"
                   className="btn ghost"
-                  onClick={() => {
-                    setSelectedNote(null);
-                    setSelectedText(null);
-                    setCommentInput("");
-                  }}
+                  onClick={closeNotePanel}
                   style={{ fontSize: "1.5rem", padding: "0.25rem 0.5rem" }}
+                  aria-label="Закрыть заметку"
                 >
                   ×
                 </button>

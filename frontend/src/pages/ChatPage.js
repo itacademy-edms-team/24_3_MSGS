@@ -6,6 +6,8 @@ import remarkGfm from "remark-gfm";
 import { useAuth } from "../auth/AuthContext";
 import { useChatHub } from "../chat/ChatHubContext";
 import { api } from "../services/api";
+/** Экраны уже ~1145px ломают сетку чата — переключаемся на полноэкранные панели */
+const CHAT_NARROW_MAX_PX = 1144;
 export default function ChatPage() {
     const { user, token } = useAuth();
     const { hubConnected, hubError, setActiveConversationId, setIncomingMessageHandler, setRefreshConversationsHandler, syncConversationGroups, pendingOpenConversationId, clearPendingOpenConversation } = useChatHub();
@@ -27,6 +29,11 @@ export default function ChatPage() {
     const [selectedText, setSelectedText] = useState(null);
     const [commentInput, setCommentInput] = useState("");
     const [expandedComments, setExpandedComments] = useState(new Set());
+    const [isNarrowChat, setIsNarrowChat] = useState(() => typeof window !== "undefined" &&
+        window.matchMedia(`(max-width: ${CHAT_NARROW_MAX_PX}px)`).matches);
+    const [chatMobilePane, setChatMobilePane] = useState("list");
+    const isNarrowChatRef = useRef(false);
+    isNarrowChatRef.current = isNarrowChat;
     const messagesEndRef = useRef(null);
     const messagesScrollRef = useRef(null);
     const userRef = useRef(user?.id);
@@ -181,6 +188,17 @@ export default function ChatPage() {
         }
     }, [token]);
     useEffect(() => {
+        const mq = window.matchMedia(`(max-width: ${CHAT_NARROW_MAX_PX}px)`);
+        const apply = () => setIsNarrowChat(mq.matches);
+        apply();
+        mq.addEventListener("change", apply);
+        return () => mq.removeEventListener("change", apply);
+    }, []);
+    useEffect(() => {
+        if (!isNarrowChat)
+            setChatMobilePane("list");
+    }, [isNarrowChat]);
+    useEffect(() => {
         setRefreshConversationsHandler(loadConversations);
         return () => setRefreshConversationsHandler(null);
     }, [loadConversations, setRefreshConversationsHandler]);
@@ -203,6 +221,8 @@ export default function ChatPage() {
         const id = pendingOpenConversationId;
         clearPendingOpenConversation();
         setSelectedConversationId(id);
+        if (isNarrowChatRef.current)
+            setChatMobilePane("thread");
     }, [pendingOpenConversationId, clearPendingOpenConversation]);
     useEffect(() => {
         setLoading(true);
@@ -238,6 +258,8 @@ export default function ChatPage() {
     const handleSelectConversation = (conversationId) => {
         setSelectedConversationId(conversationId);
         setShowShareNotes(false);
+        if (isNarrowChat)
+            setChatMobilePane("thread");
     };
     const handleStartConversation = async (friendId) => {
         if (!token)
@@ -251,6 +273,8 @@ export default function ChatPage() {
                 return [...prev, conversation];
             });
             setSelectedConversationId(conversation.id);
+            if (isNarrowChatRef.current)
+                setChatMobilePane("thread");
         }
         catch (error) {
             showStatus(error instanceof Error ? error.message : "Ошибка создания чата", 6000);
@@ -307,6 +331,13 @@ export default function ChatPage() {
             ? conversation.user2Username
             : conversation.user1Username;
     };
+    const closeNotePanel = useCallback(() => {
+        setSelectedNote(null);
+        setSelectedText(null);
+        setCommentInput("");
+        if (isNarrowChatRef.current)
+            setChatMobilePane("thread");
+    }, []);
     const loadComments = useCallback(async (noteId) => {
         if (!token)
             return;
@@ -351,7 +382,15 @@ export default function ChatPage() {
     if (loading) {
         return (_jsxs("div", { className: "fullscreen-center", children: [_jsx("div", { className: "spinner" }), _jsx("p", { children: "\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u043C \u0434\u0430\u043D\u043D\u044B\u0435..." })] }));
     }
-    return (_jsxs("div", { className: "dashboard chat-dashboard", children: [_jsxs("aside", { className: "sidebar", children: [_jsx(AppSidebarNav, {}), _jsxs("div", { className: "sidebar-section", children: [_jsxs("div", { className: "section-header", children: [_jsx("h3", { children: "\u0427\u0430\u0442\u044B" }), totalUnread > 0 && (_jsx("span", { style: {
+    const sidebarHidden = isNarrowChat && chatMobilePane !== "list";
+    const mainGridHidden = isNarrowChat && chatMobilePane === "list";
+    const threadPanelHidden = isNarrowChat && chatMobilePane === "note";
+    const gridTemplateColumns = isNarrowChat
+        ? "1fr"
+        : selectedNote
+            ? "minmax(350px, 500px) 1fr"
+            : "1fr";
+    return (_jsxs("div", { className: "dashboard chat-dashboard", children: [_jsxs("aside", { className: `sidebar chat-sidebar${sidebarHidden ? " chat-mobile-hidden" : ""}`, children: [_jsx(AppSidebarNav, {}), _jsxs("div", { className: "sidebar-section", children: [_jsxs("div", { className: "section-header", children: [_jsx("h3", { children: "\u0427\u0430\u0442\u044B" }), totalUnread > 0 && (_jsx("span", { style: {
                                             width: "8px",
                                             height: "8px",
                                             borderRadius: "50%",
@@ -359,19 +398,34 @@ export default function ChatPage() {
                                             flexShrink: 0
                                         }, title: `${totalUnread} непрочитанных` })), _jsx("span", { className: "badge", children: conversations.length })] }), _jsx("ul", { className: "folder-list", children: conversations.map((conversation) => (_jsxs("li", { className: selectedConversationId === conversation.id ? "active" : "", onClick: () => handleSelectConversation(conversation.id), children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: "0.5rem", width: "100%" }, children: [_jsx("span", { style: { flex: 1, minWidth: 0 }, children: getOtherUser(conversation) }), (conversation.unreadCount ?? 0) > 0 && (_jsx("span", { className: "badge", style: { flexShrink: 0 }, children: conversation.unreadCount > 99 ? "99+" : conversation.unreadCount }))] }), conversation.lastMessageContent && (_jsx("p", { className: "note-meta", style: { fontSize: "0.85rem", marginTop: "0.25rem" }, children: conversation.lastMessageContent.length > 30
                                                 ? conversation.lastMessageContent.substring(0, 30) + "..."
-                                                : conversation.lastMessageContent }))] }, conversation.id))) }), _jsxs("div", { className: "sidebar-section", style: { marginTop: "1.5rem" }, children: [_jsx("div", { className: "section-header", children: _jsx("h3", { children: "\u0414\u0440\u0443\u0437\u044C\u044F" }) }), _jsxs("ul", { className: "folder-list", children: [friends.map((friend) => (_jsx("li", { onClick: () => handleStartConversation(friend.id), style: { cursor: "pointer" }, children: _jsx("span", { children: friend.username }) }, friend.id))), friends.length === 0 && (_jsx("p", { className: "empty-state", style: { padding: "1rem", fontSize: "0.9rem" }, children: "\u041D\u0435\u0442 \u0434\u0440\u0443\u0437\u0435\u0439. \u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0434\u0440\u0443\u0437\u0435\u0439 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \"\u0414\u0440\u0443\u0437\u044C\u044F\"" }))] })] })] })] }), _jsxs("div", { style: {
+                                                : conversation.lastMessageContent }))] }, conversation.id))) }), _jsxs("div", { className: "sidebar-section", style: { marginTop: "1.5rem" }, children: [_jsx("div", { className: "section-header", children: _jsx("h3", { children: "\u0414\u0440\u0443\u0437\u044C\u044F" }) }), _jsxs("ul", { className: "folder-list", children: [friends.map((friend) => (_jsx("li", { onClick: () => handleStartConversation(friend.id), style: { cursor: "pointer" }, children: _jsx("span", { children: friend.username }) }, friend.id))), friends.length === 0 && (_jsx("p", { className: "empty-state", style: { padding: "1rem", fontSize: "0.9rem" }, children: "\u041D\u0435\u0442 \u0434\u0440\u0443\u0437\u0435\u0439. \u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0434\u0440\u0443\u0437\u0435\u0439 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \"\u0414\u0440\u0443\u0437\u044C\u044F\"" }))] })] })] })] }), _jsxs("div", { className: `chat-content-grid${mainGridHidden ? " chat-mobile-hidden" : ""}`, style: {
                     display: "grid",
-                    gridTemplateColumns: selectedNote ? "minmax(350px, 500px) 1fr" : "1fr",
+                    gridTemplateColumns,
                     height: "100vh",
+                    maxHeight: "100dvh",
                     gap: "0",
                     width: "100%",
-                    overflow: "hidden"
-                }, children: [_jsx("section", { className: "editor-panel", style: {
+                    maxWidth: "100%",
+                    minWidth: 0,
+                    overflow: "hidden",
+                    boxSizing: "border-box"
+                }, children: [_jsx("section", { className: `editor-panel chat-thread-panel${threadPanelHidden ? " chat-mobile-hidden" : ""}`, style: {
                             display: "flex",
                             flexDirection: "column",
                             height: "100vh",
-                            overflow: "hidden"
-                        }, children: selectedConversation ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header", style: { flexWrap: "nowrap", minWidth: 0 }, children: [_jsx("h2", { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: getOtherUser(selectedConversation) }), _jsxs("div", { style: { display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }, children: [_jsx("span", { "data-chat-hub-status": true, style: {
+                            maxHeight: "100dvh",
+                            overflow: "hidden",
+                            minWidth: 0,
+                            boxSizing: "border-box"
+                        }, children: selectedConversation ? (_jsxs(_Fragment, { children: [_jsxs("header", { className: "panel-header chat-thread-header", style: { flexWrap: isNarrowChat ? "wrap" : "nowrap", minWidth: 0, alignItems: "center" }, children: [isNarrowChat && (_jsx("button", { type: "button", className: "btn ghost", onClick: () => setChatMobilePane("list"), style: { flexShrink: 0 }, children: "\u2190 \u0427\u0430\u0442\u044B" })), _jsx("h2", { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: getOtherUser(selectedConversation) }), _jsxs("div", { style: {
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "0.75rem",
+                                                flexShrink: 0,
+                                                flexWrap: "wrap",
+                                                justifyContent: "flex-end",
+                                                marginLeft: isNarrowChat ? 0 : undefined
+                                            }, children: [_jsx("span", { "data-chat-hub-status": true, style: {
                                                         fontSize: "0.75rem",
                                                         fontWeight: 600,
                                                         padding: "0.25rem 0.5rem",
@@ -382,7 +436,7 @@ export default function ChatPage() {
                                                         ? `Ошибка: ${hubError}. Откройте консоль (F12) для подробностей.`
                                                         : hubConnected
                                                             ? "Сообщения приходят в реальном времени"
-                                                            : "Подключение к серверу чата...", children: hubConnected ? "● Подключено" : "○ Нет подключения" }), hubError && (_jsx("span", { style: { fontSize: "0.7rem", color: "#b91c1c", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }, title: hubError, children: hubError })), _jsx("button", { className: "btn secondary", onClick: () => setShowShareNotes(!showShareNotes), children: showShareNotes ? "Скрыть" : "Поделиться файлами" })] })] }), showShareNotes && (_jsxs("div", { style: { padding: "1rem", borderBottom: "1px solid #e5e7eb", maxHeight: "300px", overflowY: "auto" }, children: [_jsx("h3", { style: { marginBottom: "1rem", fontSize: "1rem" }, children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438:" }), folders.map((folder) => {
+                                                            : "Подключение к серверу чата...", children: hubConnected ? "● Подключено" : "○ Нет подключения" }), hubError && (_jsx("span", { style: { fontSize: "0.7rem", color: "#b91c1c", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }, title: hubError, children: hubError })), _jsx("button", { type: "button", className: "btn secondary", onClick: () => setShowShareNotes(!showShareNotes), children: showShareNotes ? "Скрыть" : isNarrowChat ? "Файлы" : "Поделиться файлами" })] })] }), showShareNotes && (_jsxs("div", { style: { padding: "1rem", borderBottom: "1px solid #e5e7eb", maxHeight: "300px", overflowY: "auto" }, children: [_jsx("h3", { style: { marginBottom: "1rem", fontSize: "1rem" }, children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438:" }), folders.map((folder) => {
                                             const folderNotes = notes.filter((n) => n.folderId === folder.id);
                                             if (folderNotes.length === 0)
                                                 return null;
@@ -391,18 +445,14 @@ export default function ChatPage() {
                                                         .filter((n) => !n.folderId)
                                                         .map((note) => (_jsx("li", { onClick: () => handleShareNote(note.id), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] })), notes.length === 0 && (_jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438" }))] })), _jsxs("div", { ref: messagesScrollRef, style: { flex: 1, overflowY: "auto", padding: "1rem" }, children: [messages.map((message) => {
                                             const handleNoteClick = async () => {
-                                                if (!token || !message.noteId) {
-                                                    console.log("Нет token или noteId", { token: !!token, noteId: message.noteId });
+                                                if (!token || !message.noteId)
                                                     return;
-                                                }
-                                                console.log("=== КЛИК ПО ЗАМЕТКЕ ===", message.noteId, message);
                                                 setLoadingNote(true);
                                                 try {
                                                     const note = await api.getNote(token, message.noteId);
-                                                    console.log("Заметка загружена", note);
-                                                    console.log("Устанавливаем selectedNote:", note);
                                                     setSelectedNote(note);
-                                                    console.log("selectedNote установлен");
+                                                    if (isNarrowChatRef.current)
+                                                        setChatMobilePane("note");
                                                 }
                                                 catch (error) {
                                                     console.error("Ошибка загрузки заметки", error);
@@ -421,7 +471,7 @@ export default function ChatPage() {
                                                         e.stopPropagation();
                                                         handleNoteClick();
                                                     } : undefined, style: {
-                                                        maxWidth: "70%",
+                                                        maxWidth: isNarrowChat ? "min(92%, 100%)" : "70%",
                                                         padding: "0.75rem 1rem",
                                                         borderRadius: "12px",
                                                         background: message.userId === user?.id ? "#4c3df7" : "#e5e7eb",
@@ -448,20 +498,24 @@ export default function ChatPage() {
                                                                 border: message.userId === user?.id ? "1px solid rgba(255,255,255,0.3)" : "1px solid rgba(76, 61, 247, 0.3)",
                                                                 display: "inline-block"
                                                             }, children: [_jsxs("strong", { children: ["\uD83D\uDCCE \u0417\u0430\u043C\u0435\u0442\u043A\u0430 #", message.noteId] }), loadingNote ? (_jsx("span", { style: { marginLeft: "0.5rem" }, children: "(\u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0430...)" })) : (_jsx("span", { style: { marginLeft: "0.5rem", fontSize: "0.8rem" }, children: "\u2014 \u043A\u043B\u0438\u043A\u043D\u0438\u0442\u0435, \u0447\u0442\u043E\u0431\u044B \u043E\u0442\u043A\u0440\u044B\u0442\u044C" }))] })), _jsx("p", { style: { margin: "0.5rem 0 0 0", fontSize: "0.75rem", opacity: 0.7 }, children: new Date(message.sentAt).toLocaleTimeString() })] }) }, message.id));
-                                        }), _jsx("div", { ref: messagesEndRef })] }), _jsx("div", { style: { padding: "1rem", borderTop: "1px solid #e5e7eb" }, children: _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsx("input", { type: "text", value: messageInput, onChange: (e) => setMessageInput(e.target.value), onKeyPress: (e) => e.key === "Enter" && !e.shiftKey && handleSendMessage(), placeholder: "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435...", style: { flex: 1, padding: "0.75rem", borderRadius: "8px", border: "1px solid #e5e7eb" } }), _jsx("button", { className: "btn primary", onClick: handleSendMessage, disabled: sending || !messageInput.trim(), children: "\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C" })] }) })] })) : (_jsx("div", { className: "empty-state large", children: _jsx("p", { children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0447\u0430\u0442 \u0438\u043B\u0438 \u043D\u0430\u0447\u043D\u0438\u0442\u0435 \u043D\u043E\u0432\u044B\u0439 \u0441 \u0434\u0440\u0443\u0433\u043E\u043C" }) })) }), selectedNote && (_jsxs("section", { style: {
+                                        }), _jsx("div", { ref: messagesEndRef })] }), _jsx("div", { style: { padding: "1rem", borderTop: "1px solid #e5e7eb" }, children: _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsx("input", { type: "text", value: messageInput, onChange: (e) => setMessageInput(e.target.value), onKeyPress: (e) => e.key === "Enter" && !e.shiftKey && handleSendMessage(), placeholder: "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435...", style: { flex: 1, padding: "0.75rem", borderRadius: "8px", border: "1px solid #e5e7eb" } }), _jsx("button", { className: "btn primary", onClick: handleSendMessage, disabled: sending || !messageInput.trim(), children: "\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C" })] }) })] })) : (_jsx("div", { className: "empty-state large", children: _jsx("p", { children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0447\u0430\u0442 \u0438\u043B\u0438 \u043D\u0430\u0447\u043D\u0438\u0442\u0435 \u043D\u043E\u0432\u044B\u0439 \u0441 \u0434\u0440\u0443\u0433\u043E\u043C" }) })) }), selectedNote && (_jsxs("section", { className: `chat-note-panel${isNarrowChat && chatMobilePane !== "note" ? " chat-mobile-hidden" : ""}`, style: {
                             background: "#fff",
-                            borderLeft: "1px solid #e5e7eb",
+                            borderLeft: isNarrowChat ? "none" : "1px solid #e5e7eb",
                             display: "flex",
                             flexDirection: "column",
                             height: "100vh",
+                            maxHeight: "100dvh",
                             overflow: "hidden",
                             minWidth: 0,
-                            width: "100%"
-                        }, children: [_jsxs("header", { className: "panel-header", style: { padding: "1rem", borderBottom: "1px solid #e5e7eb" }, children: [_jsx("h2", { style: { margin: 0 }, children: selectedNote.title || "Без названия" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem", alignItems: "center" }, children: [_jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), style: { fontSize: "0.9rem" }, children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { className: "btn ghost", onClick: () => {
-                                                    setSelectedNote(null);
-                                                    setSelectedText(null);
-                                                    setCommentInput("");
-                                                }, style: { fontSize: "1.5rem", padding: "0.25rem 0.5rem" }, children: "\u00D7" })] })] }), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }, children: [_jsx("div", { ref: notePreviewRef, className: "preview", style: { maxWidth: "100%", wordWrap: "break-word" }, onMouseUp: (e) => {
+                            width: "100%",
+                            boxSizing: "border-box"
+                        }, children: [_jsxs("header", { className: "panel-header chat-thread-header", style: {
+                                    padding: "1rem",
+                                    borderBottom: "1px solid #e5e7eb",
+                                    flexWrap: "wrap",
+                                    gap: "0.5rem",
+                                    alignItems: "center"
+                                }, children: [isNarrowChat && (_jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { flexShrink: 0 }, children: "\u2190 \u041A \u0447\u0430\u0442\u0443" })), _jsx("h2", { style: { margin: 0, flex: 1, minWidth: "120px", overflow: "hidden", textOverflow: "ellipsis" }, children: selectedNote.title || "Без названия" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }, children: [_jsxs("button", { type: "button", className: "btn secondary", onClick: () => setShowComments(!showComments), style: { fontSize: "0.9rem" }, children: [showComments ? "Скрыть" : "Показать", " (", comments.length, ")"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { fontSize: "1.5rem", padding: "0.25rem 0.5rem" }, "aria-label": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443", children: "\u00D7" })] })] }), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }, children: [_jsx("div", { ref: notePreviewRef, className: "preview", style: { maxWidth: "100%", wordWrap: "break-word" }, onMouseUp: (e) => {
                                             const selection = window.getSelection();
                                             const selectedString = selection?.toString().trim();
                                             if (!selection || !selectedString) {
