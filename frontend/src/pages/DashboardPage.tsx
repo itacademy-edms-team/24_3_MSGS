@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import type { Folder, Note, Message } from "../types";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
+import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
 
 type FolderFormState = {
   name: string;
@@ -25,6 +27,7 @@ type FolderFormState = {
 };
 
 const emptyEditor = { title: "", content: "" };
+const NEW_NOTE_PLACEHOLDER = "## Добро пожаловать\n\nНачните писать здесь ✍️";
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
@@ -72,12 +75,16 @@ export default function DashboardPage() {
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [comments, setComments] = useState<Message[]>([]);
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
+  const [expandedInlineCommentIds, setExpandedInlineCommentIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [showComments, setShowComments] = useState(false);
   const [collabConnected, setCollabConnected] = useState(false);
   const [activeEditors, setActiveEditors] = useState<string[]>([]);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const notePreviewRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const loadedNoteIdRef = useRef<number | null>(null);
@@ -455,6 +462,7 @@ export default function DashboardPage() {
       wordUndoStackRef.current = [];
       wordRedoStackRef.current = [];
       setComments([]);
+      setExpandedInlineCommentIds(new Set());
       return;
     }
     const note = notes.find((n) => n.id === selectedNoteId);
@@ -466,9 +474,42 @@ export default function DashboardPage() {
       savedSnapshotRef.current = { ...payload };
       wordUndoStackRef.current = [payload.content];
       wordRedoStackRef.current = [];
+      setExpandedInlineCommentIds(new Set());
       void loadComments(selectedNoteId);
     }
   }, [selectedNoteId, notes, loadComments]);
+
+  useLayoutEffect(() => {
+    const el = notePreviewRef.current;
+    if (!el) return;
+    applyNoteCommentHighlights(el, editor.content, comments, expandedInlineCommentIds);
+  }, [editor.content, comments, expandedInlineCommentIds]);
+
+  useEffect(() => {
+    const root = notePreviewRef.current;
+    if (!root || !selectedNoteId) return;
+
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      const pin = t.closest?.(".note-comment-pin");
+      if (!pin || !root.contains(pin)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const wrap = pin.closest("[data-comment-id]");
+      const raw = wrap?.getAttribute("data-comment-id");
+      const id = raw ? parseInt(raw, 10) : NaN;
+      if (Number.isNaN(id)) return;
+      setExpandedInlineCommentIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    };
+
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, [selectedNoteId]);
 
   useEffect(() => {
     if (!selectedNoteId) {
@@ -720,7 +761,7 @@ export default function DashboardPage() {
     try {
       const newNote = await api.createNote(token, {
         title: "Новая заметка",
-        content: "## Добро пожаловать\n\nНачните писать здесь ✍️",
+        content: "",
         folderId: selectedFolderId
       });
       setNotes((prev) => [newNote, ...prev]);
@@ -1365,7 +1406,7 @@ export default function DashboardPage() {
                       setSelectedText(null);
                     }
                   }}
-                  placeholder="Пишите в Markdown..."
+                  placeholder={NEW_NOTE_PLACEHOLDER}
                   style={{ flex: 1 }}
                 />
                 {selectedText && (
@@ -1406,7 +1447,7 @@ export default function DashboardPage() {
                   </div>
                 )}
               </div>
-              <div className="preview" style={{ position: "relative" }}>
+              <div ref={notePreviewRef} className="preview" style={{ position: "relative" }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{editor.content}</ReactMarkdown>
                 {showComments && comments.length > 0 && (
                   <div style={{ marginTop: "2rem", paddingTop: "1.5rem", borderTop: "2px solid #e5e7eb" }}>

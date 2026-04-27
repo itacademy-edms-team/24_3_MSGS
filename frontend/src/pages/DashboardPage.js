@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,7 +10,9 @@ import { api, HUB_BASE_URL } from "../services/api";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
+import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
 const emptyEditor = { title: "", content: "" };
+const NEW_NOTE_PLACEHOLDER = "## Добро пожаловать\n\nНачните писать здесь ✍️";
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 export default function DashboardPage() {
     const { token, user } = useAuth();
@@ -36,12 +38,14 @@ export default function DashboardPage() {
     const [passwordModalVisible, setPasswordModalVisible] = useState(false);
     const [comments, setComments] = useState([]);
     const [expandedComments, setExpandedComments] = useState(new Set());
+    const [expandedInlineCommentIds, setExpandedInlineCommentIds] = useState(() => new Set());
     const [selectedText, setSelectedText] = useState(null);
     const [commentInput, setCommentInput] = useState("");
     const [showComments, setShowComments] = useState(false);
     const [collabConnected, setCollabConnected] = useState(false);
     const [activeEditors, setActiveEditors] = useState([]);
     const contentTextareaRef = useRef(null);
+    const notePreviewRef = useRef(null);
     const importInputRef = useRef(null);
     const [importing, setImporting] = useState(false);
     const loadedNoteIdRef = useRef(null);
@@ -376,6 +380,7 @@ export default function DashboardPage() {
             wordUndoStackRef.current = [];
             wordRedoStackRef.current = [];
             setComments([]);
+            setExpandedInlineCommentIds(new Set());
             return;
         }
         const note = notes.find((n) => n.id === selectedNoteId);
@@ -388,9 +393,44 @@ export default function DashboardPage() {
             savedSnapshotRef.current = { ...payload };
             wordUndoStackRef.current = [payload.content];
             wordRedoStackRef.current = [];
+            setExpandedInlineCommentIds(new Set());
             void loadComments(selectedNoteId);
         }
     }, [selectedNoteId, notes, loadComments]);
+    useLayoutEffect(() => {
+        const el = notePreviewRef.current;
+        if (!el)
+            return;
+        applyNoteCommentHighlights(el, editor.content, comments, expandedInlineCommentIds);
+    }, [editor.content, comments, expandedInlineCommentIds]);
+    useEffect(() => {
+        const root = notePreviewRef.current;
+        if (!root || !selectedNoteId)
+            return;
+        const onClick = (e) => {
+            const t = e.target;
+            const pin = t.closest?.(".note-comment-pin");
+            if (!pin || !root.contains(pin))
+                return;
+            e.preventDefault();
+            e.stopPropagation();
+            const wrap = pin.closest("[data-comment-id]");
+            const raw = wrap?.getAttribute("data-comment-id");
+            const id = raw ? parseInt(raw, 10) : NaN;
+            if (Number.isNaN(id))
+                return;
+            setExpandedInlineCommentIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id))
+                    next.delete(id);
+                else
+                    next.add(id);
+                return next;
+            });
+        };
+        root.addEventListener("click", onClick);
+        return () => root.removeEventListener("click", onClick);
+    }, [selectedNoteId]);
     useEffect(() => {
         if (!selectedNoteId) {
             yDocRef.current?.destroy();
@@ -613,7 +653,7 @@ export default function DashboardPage() {
         try {
             const newNote = await api.createNote(token, {
                 title: "Новая заметка",
-                content: "## Добро пожаловать\n\nНачните писать здесь ✍️",
+                content: "",
                 folderId: selectedFolderId
             });
             setNotes((prev) => [newNote, ...prev]);
@@ -973,14 +1013,14 @@ export default function DashboardPage() {
                                                 else {
                                                     setSelectedText(null);
                                                 }
-                                            }, placeholder: "\u041F\u0438\u0448\u0438\u0442\u0435 \u0432 Markdown...", style: { flex: 1 } }), selectedText && (_jsxs("div", { style: { padding: "0.75rem", background: "#eef2ff", borderTop: "1px solid #e5e7eb" }, children: [_jsxs("p", { style: { margin: "0 0 0.5rem 0", fontSize: "0.85rem", fontWeight: 600 }, children: ["\u0412\u044B\u0434\u0435\u043B\u0435\u043D \u0442\u0435\u043A\u0441\u0442: \"", editor.content.substring(selectedText.start, selectedText.end).substring(0, 50), "...\""] }), _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsx("input", { type: "text", value: commentInput, onChange: (e) => setCommentInput(e.target.value), placeholder: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439...", style: { flex: 1, padding: "0.5rem", borderRadius: "6px", border: "1px solid #e5e7eb" }, onKeyPress: (e) => {
+                                            }, placeholder: NEW_NOTE_PLACEHOLDER, style: { flex: 1 } }), selectedText && (_jsxs("div", { style: { padding: "0.75rem", background: "#eef2ff", borderTop: "1px solid #e5e7eb" }, children: [_jsxs("p", { style: { margin: "0 0 0.5rem 0", fontSize: "0.85rem", fontWeight: 600 }, children: ["\u0412\u044B\u0434\u0435\u043B\u0435\u043D \u0442\u0435\u043A\u0441\u0442: \"", editor.content.substring(selectedText.start, selectedText.end).substring(0, 50), "...\""] }), _jsxs("div", { style: { display: "flex", gap: "0.5rem" }, children: [_jsx("input", { type: "text", value: commentInput, onChange: (e) => setCommentInput(e.target.value), placeholder: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439...", style: { flex: 1, padding: "0.5rem", borderRadius: "6px", border: "1px solid #e5e7eb" }, onKeyPress: (e) => {
                                                                 if (e.key === "Enter" && commentInput.trim()) {
                                                                     handleAddComment();
                                                                 }
                                                             } }), _jsx("button", { className: "btn primary", onClick: handleAddComment, disabled: !commentInput.trim() || !token, children: "\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C" }), _jsx("button", { className: "btn ghost", onClick: () => {
                                                                 setSelectedText(null);
                                                                 setCommentInput("");
-                                                            }, children: "\u041E\u0442\u043C\u0435\u043D\u0430" })] })] }))] }), _jsxs("div", { className: "preview", style: { position: "relative" }, children: [_jsx(ReactMarkdown, { remarkPlugins: [remarkGfm], children: editor.content }), showComments && comments.length > 0 && (_jsxs("div", { style: { marginTop: "2rem", paddingTop: "1.5rem", borderTop: "2px solid #e5e7eb" }, children: [_jsxs("h3", { style: { marginBottom: "1rem", fontSize: "1.1rem" }, children: ["\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), comments.map((comment) => {
+                                                            }, children: "\u041E\u0442\u043C\u0435\u043D\u0430" })] })] }))] }), _jsxs("div", { ref: notePreviewRef, className: "preview", style: { position: "relative" }, children: [_jsx(ReactMarkdown, { remarkPlugins: [remarkGfm], children: editor.content }), showComments && comments.length > 0 && (_jsxs("div", { style: { marginTop: "2rem", paddingTop: "1.5rem", borderTop: "2px solid #e5e7eb" }, children: [_jsxs("h3", { style: { marginBottom: "1rem", fontSize: "1.1rem" }, children: ["\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), comments.map((comment) => {
                                                     const isExpanded = expandedComments.has(comment.id);
                                                     const hasSelection = comment.selectionStart != null && comment.selectionEnd != null;
                                                     const selectedText = hasSelection
