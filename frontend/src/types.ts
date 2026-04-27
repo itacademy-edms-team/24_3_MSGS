@@ -13,6 +13,9 @@ export type Note = {
   createdAt: string;
   updatedAt: string;
   folderId: number | null;
+  canEdit?: boolean;
+  isShared?: boolean;
+  sharedByUsername?: string | null;
 };
 
 export type Folder = {
@@ -113,5 +116,6 @@ export type CreateMessagePayload = {
 export type ShareNotePayload = {
   conversationId: number;
   noteId: number;
+  allowEdit?: boolean;
 };
 

@@ -10,8 +10,10 @@ import {
 import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import * as SignalR from "@microsoft/signalr";
+import * as Y from "yjs";
 import { useAuth } from "../auth/AuthContext";
-import { api } from "../services/api";
+import { api, HUB_BASE_URL } from "../services/api";
 import type { Folder, Note, Message } from "../types";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
@@ -26,12 +28,33 @@ const emptyEditor = { title: "", content: "" };
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
+type NotePatchedEvent = {
+  noteId: number;
+  title: string;
+  content: string;
+  folderId: number | null;
+  updatedAt: string;
+  updatedByUserId: number;
+};
+
+type YjsUpdateEvent = {
+  noteId: number;
+  updateBase64: string;
+  userId: number;
+};
+
+type PresenceChangedEvent = {
+  noteId: number;
+  editors: string[];
+};
+
 export default function DashboardPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [showSharedOnly, setShowSharedOnly] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
   const [editor, setEditor] = useState(emptyEditor);
   const [search, setSearch] = useState("");
@@ -47,26 +70,51 @@ export default function DashboardPage() {
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
   const [commentInput, setCommentInput] = useState("");
   const [showComments, setShowComments] = useState(false);
+  const [collabConnected, setCollabConnected] = useState(false);
+  const [activeEditors, setActiveEditors] = useState<string[]>([]);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const loadedNoteIdRef = useRef<number | null>(null);
   const savedSnapshotRef = useRef<{ title: string; content: string }>({ title: "", content: "" });
   const editorRef = useRef(emptyEditor);
+  const collabConnectionRef = useRef<SignalR.HubConnection | null>(null);
+  const joinedNoteIdRef = useRef<number | null>(null);
+  const selectedNoteIdRef = useRef<number | null>(null);
+  const yDocRef = useRef<Y.Doc | null>(null);
+  const yTextRef = useRef<Y.Text | null>(null);
+  const applyingRemoteYjsRef = useRef(false);
+  const typingPresenceRef = useRef(false);
+  const presenceDebounceRef = useRef<number | null>(null);
   editorRef.current = editor;
+  selectedNoteIdRef.current = selectedNoteId;
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
     [notes, selectedNoteId]
   );
+  const canEditSelectedNote = selectedNote?.canEdit ?? true;
 
   const filteredNotes = useMemo(() => {
-    return notes.filter((note) => {
+    const result = notes.filter((note) => {
+      const matchesShared = showSharedOnly ? Boolean(note.isShared) : true;
       const matchesFolder = selectedFolderId ? note.folderId === selectedFolderId : true;
       const matchesSearch = note.title.toLowerCase().includes(search.toLowerCase());
-      return matchesFolder && matchesSearch;
+      return matchesShared && matchesFolder && matchesSearch;
     });
-  }, [notes, selectedFolderId, search]);
+
+    if (!selectedFolderId) {
+      return result.sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    }
+
+    return result;
+  }, [notes, selectedFolderId, showSharedOnly, search]);
+  const sharedNotesCount = useMemo(
+    () => filteredNotes.filter((note) => note.isShared).length,
+    [filteredNotes]
+  );
 
   const showStatus = (message: string, timeout = 4000) => {
     setStatus(message);
@@ -74,6 +122,46 @@ export default function DashboardPage() {
       setTimeout(() => setStatus(null), timeout);
     }
   };
+
+  const toBase64 = (bytes: Uint8Array) => {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i] ?? 0);
+    }
+    return btoa(binary);
+  };
+
+  const fromBase64 = (base64: string) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  };
+
+  const emitPresence = useCallback((isEditing: boolean) => {
+    typingPresenceRef.current = isEditing;
+    const connection = collabConnectionRef.current;
+    const noteId = selectedNoteIdRef.current;
+    if (connection && noteId && connection.state === SignalR.HubConnectionState.Connected) {
+      void connection.invoke("SetPresence", noteId, isEditing).catch(() => {});
+    }
+  }, []);
+
+  const emitPresenceDebounced = useCallback((isEditing: boolean) => {
+    if (presenceDebounceRef.current != null) {
+      window.clearTimeout(presenceDebounceRef.current);
+      presenceDebounceRef.current = null;
+    }
+
+    emitPresence(isEditing);
+    if (isEditing) {
+      presenceDebounceRef.current = window.setTimeout(() => {
+        emitPresence(false);
+      }, 1200);
+    }
+  }, [emitPresence]);
 
   const handleError = useCallback((error: unknown) => {
     const message = error instanceof Error ? error.message : "Что-то пошло не так";
@@ -90,13 +178,13 @@ export default function DashboardPage() {
     if (!token) return;
     const response = await api.getNotes(token);
     setNotes(response);
-    if (response.length && !selectedNoteId) {
+    if (response.length) {
       const firstNote = response[0];
       if (firstNote) {
-        setSelectedNoteId(firstNote.id);
+        setSelectedNoteId((prev) => prev ?? firstNote.id);
       }
     }
-  }, [token, selectedNoteId]);
+  }, [token]);
 
   const loadComments = useCallback(async (noteId: number) => {
     if (!token) return;
@@ -118,21 +206,45 @@ export default function DashboardPage() {
   // Обработка параметра noteId из URL
   useEffect(() => {
     const noteIdParam = searchParams.get("noteId");
-    if (noteIdParam && notes.length > 0) {
-      const noteId = parseInt(noteIdParam, 10);
-      if (!isNaN(noteId)) {
-        const note = notes.find((n) => n.id === noteId);
-        if (note) {
-          setSelectedNoteId(noteId);
-          // Убираем параметр из URL после открытия заметки
-          setSearchParams({});
-        }
-      }
+    if (!noteIdParam || !token) {
+      return;
     }
-  }, [notes, searchParams, setSearchParams]);
+
+    const noteId = parseInt(noteIdParam, 10);
+    if (isNaN(noteId)) {
+      return;
+    }
+
+    const existing = notes.find((n) => n.id === noteId);
+    if (existing) {
+      setSelectedNoteId(noteId);
+      setSearchParams({});
+      return;
+    }
+
+    // Fallback: заметка может быть расшаренной и ещё не попасть в локальный список.
+    void api
+      .getNote(token, noteId)
+      .then((note) => {
+        setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
+        setSelectedNoteId(note.id);
+        setSearchParams({});
+      })
+      .catch(() => {
+        showStatus("Не удалось открыть заметку по ссылке", 5000);
+      });
+  }, [notes, searchParams, setSearchParams, token]);
 
   useEffect(() => {
     if (!selectedNoteId) {
+      if (presenceDebounceRef.current != null) {
+        window.clearTimeout(presenceDebounceRef.current);
+        presenceDebounceRef.current = null;
+      }
+      if (collabConnectionRef.current && joinedNoteIdRef.current != null) {
+        void collabConnectionRef.current.invoke("LeaveNote", joinedNoteIdRef.current).catch(() => {});
+      }
+      joinedNoteIdRef.current = null;
       loadedNoteIdRef.current = null;
       setEditor(emptyEditor);
       savedSnapshotRef.current = { title: "", content: "" };
@@ -150,6 +262,173 @@ export default function DashboardPage() {
     }
   }, [selectedNoteId, notes, loadComments]);
 
+  useEffect(() => {
+    if (!selectedNoteId) {
+      yDocRef.current?.destroy();
+      yDocRef.current = null;
+      yTextRef.current = null;
+      setActiveEditors([]);
+      typingPresenceRef.current = false;
+      return;
+    }
+
+    const note = notes.find((n) => n.id === selectedNoteId);
+    if (!note) {
+      return;
+    }
+
+    const doc = new Y.Doc();
+    const yText = doc.getText("content");
+    yText.insert(0, note.content ?? "");
+    yDocRef.current = doc;
+    yTextRef.current = yText;
+
+    const onYTextChange = () => {
+      const nextContent = yText.toString();
+      setEditor((prev) => (prev.content === nextContent ? prev : { ...prev, content: nextContent }));
+    };
+    yText.observe(onYTextChange);
+
+    const onYDocUpdate = (update: Uint8Array, origin: unknown) => {
+      if (origin === "remote") {
+        return;
+      }
+
+      const connection = collabConnectionRef.current;
+      const noteId = selectedNoteIdRef.current;
+      if (!connection || connection.state !== SignalR.HubConnectionState.Connected || !noteId) {
+        return;
+      }
+
+      const payload = toBase64(update);
+      void connection.invoke("SubmitYjsUpdate", noteId, payload).catch(() => {});
+    };
+    doc.on("update", onYDocUpdate);
+
+    return () => {
+      yText.unobserve(onYTextChange);
+      doc.off("update", onYDocUpdate);
+      doc.destroy();
+      if (yDocRef.current === doc) {
+        yDocRef.current = null;
+        yTextRef.current = null;
+      }
+    };
+  }, [selectedNoteId, notes]);
+
+  useEffect(() => {
+    if (!token) {
+      collabConnectionRef.current = null;
+      joinedNoteIdRef.current = null;
+      return;
+    }
+
+    const connection = new SignalR.HubConnectionBuilder()
+      .withUrl(`${HUB_BASE_URL}/hubs/notes-collab`, { accessTokenFactory: () => token })
+      .withAutomaticReconnect()
+      .build();
+
+    connection.on("NotePatched", (payload: NotePatchedEvent) => {
+      const updatedAt = payload.updatedAt || new Date().toISOString();
+      setNotes((prev) =>
+        prev.map((note) =>
+          note.id === payload.noteId
+            ? {
+                ...note,
+                title: payload.title,
+                content: payload.content,
+                folderId: payload.folderId,
+                updatedAt
+              }
+            : note
+        )
+      );
+
+      if (payload.noteId === selectedNoteIdRef.current && payload.updatedByUserId !== user?.id) {
+        const nextEditor = { title: payload.title, content: payload.content };
+        loadedNoteIdRef.current = payload.noteId;
+        savedSnapshotRef.current = nextEditor;
+        setEditor(nextEditor);
+        showStatus("Заметка обновлена другим участником", 2500);
+      }
+    });
+    connection.on("YjsUpdate", (payload: YjsUpdateEvent) => {
+      if (payload.userId === user?.id) {
+        return;
+      }
+      if (payload.noteId !== selectedNoteIdRef.current || !yDocRef.current) {
+        return;
+      }
+      try {
+        applyingRemoteYjsRef.current = true;
+        Y.applyUpdate(yDocRef.current, fromBase64(payload.updateBase64), "remote");
+      } catch {
+        // Игнорируем поврежденный update.
+      } finally {
+        applyingRemoteYjsRef.current = false;
+      }
+    });
+    connection.on("PresenceChanged", (payload: PresenceChangedEvent) => {
+      if (payload.noteId === selectedNoteIdRef.current) {
+        setActiveEditors(payload.editors ?? []);
+      }
+    });
+    connection.onclose(() => setCollabConnected(false));
+    connection.onreconnecting(() => setCollabConnected(false));
+    connection.onreconnected(() => {
+      setCollabConnected(true);
+      const noteId = selectedNoteIdRef.current;
+      if (!noteId) {
+        return;
+      }
+      void connection
+        .invoke("JoinNote", noteId)
+        .then(() => connection.invoke("SetPresence", noteId, typingPresenceRef.current))
+        .catch(() => {});
+    });
+
+    connection
+      .start()
+      .then(() => setCollabConnected(true))
+      .catch((error) => {
+        handleError(error);
+      });
+
+    collabConnectionRef.current = connection;
+    return () => {
+      if (joinedNoteIdRef.current != null) {
+        void connection.invoke("LeaveNote", joinedNoteIdRef.current).catch(() => {});
+      }
+      joinedNoteIdRef.current = null;
+      connection.off("NotePatched");
+      connection.off("YjsUpdate");
+      connection.off("PresenceChanged");
+      setCollabConnected(false);
+      void connection.stop().catch(() => {});
+      collabConnectionRef.current = null;
+    };
+  }, [token, user?.id, handleError]);
+
+  useEffect(() => {
+    const connection = collabConnectionRef.current;
+    if (!connection || !collabConnected || !selectedNoteId) {
+      return;
+    }
+
+    const join = async () => {
+      const previous = joinedNoteIdRef.current;
+      if (previous != null && previous !== selectedNoteId) {
+        await connection.invoke("LeaveNote", previous);
+      }
+      await connection.invoke("JoinNote", selectedNoteId);
+      await connection.invoke("SetPresence", selectedNoteId, typingPresenceRef.current);
+      joinedNoteIdRef.current = selectedNoteId;
+      setActiveEditors([]);
+    };
+
+    void join().catch(() => {});
+  }, [selectedNoteId, collabConnected]);
+
   const handleSelectNote = (noteId: number) => {
     setSelectedNoteId(noteId);
   };
@@ -157,6 +436,12 @@ export default function DashboardPage() {
   const persistNote = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!token || !selectedNoteId) return;
+      if (selectedNote && selectedNote.canEdit === false) {
+        if (!options?.silent) {
+          showStatus("У вас только право чтения для этой заметки", 3500);
+        }
+        return;
+      }
       const ed = editorRef.current;
       const title = ed.title || "Без названия";
       const content = ed.content;
@@ -169,7 +454,7 @@ export default function DashboardPage() {
 
       setSaving(true);
       try {
-        await api.updateNote(token, selectedNoteId, {
+        await api.collabUpdateNote(token, selectedNoteId, {
           title,
           content,
           folderId: selectedFolderId
@@ -192,11 +477,11 @@ export default function DashboardPage() {
         setSaving(false);
       }
     },
-    [token, selectedNoteId, selectedFolderId, handleError]
+    [token, selectedNoteId, selectedFolderId, selectedNote, handleError]
   );
 
   useEffect(() => {
-    if (!token || !selectedNoteId || loading) return;
+    if (!token || !selectedNoteId || loading || !canEditSelectedNote) return;
 
     const timer = window.setTimeout(() => {
       void persistNote({ silent: true });
@@ -282,6 +567,7 @@ export default function DashboardPage() {
       setNotes((prev) => prev.filter((note) => note.folderId !== id));
       if (selectedFolderId === id) {
         setSelectedFolderId(null);
+        setShowSharedOnly(false);
       }
       showStatus("Папка удалена");
     } catch (error) {
@@ -455,15 +741,34 @@ export default function DashboardPage() {
           </form>
 
           <ul className="folder-list">
-            <li className={!selectedFolderId ? "active" : ""} onClick={() => setSelectedFolderId(null)}>
+            <li
+              className={!selectedFolderId && !showSharedOnly ? "active" : ""}
+              onClick={() => {
+                setSelectedFolderId(null);
+                setShowSharedOnly(false);
+              }}
+            >
               <span>Все заметки</span>
               <span className="badge light">{notes.length}</span>
+            </li>
+            <li
+              className={showSharedOnly ? "active" : ""}
+              onClick={() => {
+                setSelectedFolderId(null);
+                setShowSharedOnly(true);
+              }}
+            >
+              <span>Поделились со мной</span>
+              <span className="badge light">{notes.filter((note) => note.isShared).length}</span>
             </li>
             {folders.map((folder) => (
               <li
                 key={folder.id}
                 className={selectedFolderId === folder.id ? "active" : ""}
-                onClick={() => setSelectedFolderId(folder.id)}
+                onClick={() => {
+                  setSelectedFolderId(folder.id);
+                  setShowSharedOnly(false);
+                }}
               >
                 <span>{folder.name}</span>
                 <div className="folder-meta">
@@ -490,8 +795,17 @@ export default function DashboardPage() {
       <section className="notes-panel">
         <header className="panel-header">
           <div>
-            <h2>{selectedFolderId ? folderName(selectedFolderId) : "Все заметки"}</h2>
-            <p>{filteredNotes.length} заметок</p>
+            <h2>
+              {showSharedOnly
+                ? "Поделились со мной"
+                : selectedFolderId
+                  ? folderName(selectedFolderId)
+                  : "Все заметки"}
+            </h2>
+            <p>
+              {filteredNotes.length} заметок
+              {sharedNotesCount > 0 ? ` • доступных мне: ${sharedNotesCount}` : ""}
+            </p>
           </div>
           <div className="panel-actions">
             <input
@@ -526,7 +840,7 @@ export default function DashboardPage() {
             >
               Экспорт списка
             </button>
-            <button className="btn primary" onClick={handleCreateNote} disabled={saving}>
+            <button className="btn primary" onClick={handleCreateNote} disabled={saving || showSharedOnly}>
               + Новая заметка
             </button>
           </div>
@@ -543,20 +857,29 @@ export default function DashboardPage() {
                 <p className="note-title">{note.title || "Без названия"}</p>
                 <p className="note-meta">
                   {new Date(note.updatedAt).toLocaleString()} • {folderName(note.folderId ?? null)}
+                  {note.isShared
+                    ? ` • доступ от ${note.sharedByUsername || "пользователя"} • ${note.canEdit ? "edit" : "read"}`
+                    : ""}
                 </p>
               </div>
-              <button
-                className="icon-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteNote(note.id);
-                }}
-              >
-                ×
-              </button>
+              {!note.isShared && (
+                <button
+                  className="icon-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteNote(note.id);
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </li>
           ))}
-          {!filteredNotes.length && <p className="empty-state">Нет заметок в этой папке</p>}
+          {!filteredNotes.length && (
+            <p className="empty-state">
+              {showSharedOnly ? "Пока нет заметок, которыми поделились" : "Нет заметок в этой папке"}
+            </p>
+          )}
         </ul>
       </section>
 
@@ -569,10 +892,41 @@ export default function DashboardPage() {
                 value={editor.title}
                 onChange={(e) => setEditor((prev) => ({ ...prev, title: e.target.value }))}
                 placeholder="Название заметки"
+                disabled={!canEditSelectedNote}
               />
               <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                 <span style={{ fontSize: "0.75rem", color: "#667085" }}>
-                  Автосохранение ~{AUTOSAVE_DEBOUNCE_MS / 1000} с после паузы
+                  {canEditSelectedNote
+                    ? `Автосохранение ~${AUTOSAVE_DEBOUNCE_MS / 1000} с после паузы`
+                    : "Режим только чтение"}
+                </span>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    padding: "0.2rem 0.45rem",
+                    borderRadius: "6px",
+                    background: canEditSelectedNote ? "rgba(5, 150, 105, 0.15)" : "rgba(107, 114, 128, 0.15)",
+                    color: canEditSelectedNote ? "#059669" : "#6b7280"
+                  }}
+                >
+                  {canEditSelectedNote ? "edit" : "read"}
+                </span>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    padding: "0.2rem 0.45rem",
+                    borderRadius: "6px",
+                    background: collabConnected ? "rgba(5, 150, 105, 0.15)" : "rgba(107, 114, 128, 0.15)",
+                    color: collabConnected ? "#059669" : "#6b7280"
+                  }}
+                  title={collabConnected ? "Синхронизация через SignalR + Yjs активна" : "Нет соединения для совместного редактирования"}
+                >
+                  {collabConnected ? "● Коллаб онлайн" : "○ Коллаб оффлайн"}
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "#667085" }}>
+                  Редактируют: {activeEditors.length ? activeEditors.join(", ") : "никто"}
                 </span>
                 <button
                   type="button"
@@ -588,7 +942,7 @@ export default function DashboardPage() {
                 >
                   {showComments ? "Скрыть" : "Показать"} комментарии ({comments.length})
                 </button>
-                <button className="btn success" onClick={handleSaveNote} disabled={saving}>
+                <button className="btn success" onClick={handleSaveNote} disabled={saving || !canEditSelectedNote}>
                   {saving ? "Сохраняем..." : "Сохранить"}
                 </button>
               </div>
@@ -613,7 +967,7 @@ export default function DashboardPage() {
                         ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
                         : undefined
                     }
-                    disabled={!voiceSupported}
+                    disabled={!voiceSupported || !canEditSelectedNote}
                     onClick={toggleVoiceInput}
                     title={
                       !voiceSupported
@@ -632,7 +986,36 @@ export default function DashboardPage() {
                 <textarea
                   ref={contentTextareaRef}
                   value={editor.content}
-                  onChange={(e) => setEditor((prev) => ({ ...prev, content: e.target.value }))}
+                  disabled={!canEditSelectedNote}
+                  onChange={(e) => {
+                    if (!canEditSelectedNote) {
+                      return;
+                    }
+                    const nextContent = e.target.value;
+                    const yText = yTextRef.current;
+                    if (!yText) {
+                      setEditor((prev) => ({ ...prev, content: nextContent }));
+                      return;
+                    }
+
+                    const current = yText.toString();
+                    if (current === nextContent) {
+                      return;
+                    }
+
+                    yText.doc?.transact(() => {
+                      yText.delete(0, yText.length);
+                      yText.insert(0, nextContent);
+                    }, "local");
+                    emitPresenceDebounced(true);
+                  }}
+                  onFocus={() => {
+                    if (!canEditSelectedNote) return;
+                    emitPresence(true);
+                  }}
+                  onBlur={() => {
+                    emitPresence(false);
+                  }}
                   onMouseUp={(e) => {
                     const textarea = e.target as HTMLTextAreaElement;
                     const start = textarea.selectionStart;

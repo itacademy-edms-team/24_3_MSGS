@@ -260,10 +260,14 @@ namespace NotesApp.API.Controllers
                 {
                     NoteId = dto.NoteId,
                     UserId = otherUserId,
-                    Permission = "read",
+                    Permission = dto.AllowEdit ? "edit" : "read",
                     SharedAt = DateTime.UtcNow
                 };
                 _context.NoteShares.Add(share);
+            }
+            else if (existingShare.Permission != (dto.AllowEdit ? "edit" : "read"))
+            {
+                existingShare.Permission = dto.AllowEdit ? "edit" : "read";
             }
 
             conversation.UpdatedAt = DateTime.UtcNow;
@@ -317,6 +321,7 @@ namespace NotesApp.API.Controllers
     {
         public int ConversationId { get; set; }
         public int NoteId { get; set; }
+        public bool AllowEdit { get; set; }
     }
 }
 

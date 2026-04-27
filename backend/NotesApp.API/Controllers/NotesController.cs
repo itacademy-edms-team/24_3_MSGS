@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using NotesApp.API.Data;
+using NotesApp.API.Hubs;
 using NotesApp.API.Models;
 using System.Security.Claims;
 
@@ -13,10 +15,12 @@ namespace NotesApp.API.Controllers
     public class NotesController : ControllerBase
     {
         private readonly NotesDbContext _context;
+        private readonly IHubContext<NotesCollabHub> _notesHubContext;
 
-        public NotesController(NotesDbContext context)
+        public NotesController(NotesDbContext context, IHubContext<NotesCollabHub> notesHubContext)
         {
             _context = context;
+            _notesHubContext = notesHubContext;
         }
 
         // GET: api/notes
@@ -24,11 +28,21 @@ namespace NotesApp.API.Controllers
         public async Task<ActionResult<IEnumerable<Note>>> GetNotes()
         {
             var userId = GetCurrentUserId();
-            return await _context.Notes
+            var notes = await _context.Notes
                 .Include(n => n.User)
                 .Include(n => n.Folder)
-                .Where(n => n.UserId == userId)
+                .Include(n => n.Shares)
+                .Where(n => n.UserId == userId || n.Shares.Any(s => s.UserId == userId))
                 .ToListAsync();
+
+            foreach (var note in notes)
+            {
+                note.CanEdit = CanEdit(note, userId);
+                note.IsShared = note.UserId != userId;
+                note.SharedByUsername = note.UserId == userId ? null : note.User?.Username;
+            }
+
+            return notes;
         }
 
         // GET: api/notes/5
@@ -53,6 +67,9 @@ namespace NotesApp.API.Controllers
                 return Forbid("Нет доступа к этой заметке");
             }
 
+            note.CanEdit = CanEdit(note, userId);
+            note.IsShared = note.UserId != userId;
+            note.SharedByUsername = note.UserId == userId ? null : note.User?.Username;
             return note;
         }
 
@@ -73,6 +90,9 @@ namespace NotesApp.API.Controllers
             
             _context.Notes.Add(note);
             await _context.SaveChangesAsync();
+            note.CanEdit = true;
+            note.IsShared = false;
+            note.SharedByUsername = null;
 
             return CreatedAtAction("GetNote", new { id = note.Id }, note);
         }
@@ -87,10 +107,17 @@ namespace NotesApp.API.Controllers
             }
 
             var userId = GetCurrentUserId();
-            var existingNote = await _context.Notes.FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
+            var existingNote = await _context.Notes
+                .Include(n => n.Shares)
+                .FirstOrDefaultAsync(n => n.Id == id);
             if (existingNote == null)
             {
                 return NotFound();
+            }
+
+            if (!CanEdit(existingNote, userId))
+            {
+                return Forbid("Нет прав на редактирование заметки");
             }
 
             existingNote.Title = note.Title;
@@ -117,6 +144,46 @@ namespace NotesApp.API.Controllers
             return NoContent();
         }
 
+        // POST: api/notes/5/collab-update
+        [HttpPost("{id}/collab-update")]
+        public async Task<IActionResult> ApplyCollabUpdate(int id, [FromBody] UpdateNoteDto update)
+        {
+            var userId = GetCurrentUserId();
+            var existingNote = await _context.Notes
+                .Include(n => n.Shares)
+                .FirstOrDefaultAsync(n => n.Id == id);
+
+            if (existingNote == null)
+            {
+                return NotFound();
+            }
+
+            if (!CanEdit(existingNote, userId))
+            {
+                return Forbid("Нет прав на редактирование заметки");
+            }
+
+            existingNote.Title = string.IsNullOrWhiteSpace(update.Title) ? "Без названия" : update.Title;
+            existingNote.Content = update.Content ?? string.Empty;
+            existingNote.FolderId = update.FolderId;
+            existingNote.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            await _notesHubContext.Clients
+                .Group($"note_{existingNote.Id}")
+                .SendAsync("NotePatched", new
+                {
+                    noteId = existingNote.Id,
+                    title = existingNote.Title,
+                    content = existingNote.Content,
+                    folderId = existingNote.FolderId,
+                    updatedAt = existingNote.UpdatedAt,
+                    updatedByUserId = userId
+                });
+
+            return NoContent();
+        }
+
         // DELETE: api/notes/5
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteNote(int id)
@@ -139,6 +206,19 @@ namespace NotesApp.API.Controllers
             return _context.Notes.Any(e => e.Id == id);
         }
 
+        private static bool CanEdit(Note note, int userId)
+        {
+            if (note.UserId == userId)
+            {
+                return true;
+            }
+
+            return note.Shares.Any(s =>
+                s.UserId == userId &&
+                (string.Equals(s.Permission, "edit", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(s.Permission, "write", StringComparison.OrdinalIgnoreCase)));
+        }
+
         private int GetCurrentUserId()
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -149,5 +229,12 @@ namespace NotesApp.API.Controllers
 
             return int.Parse(userIdClaim);
         }
+    }
+
+    public class UpdateNoteDto
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public int? FolderId { get; set; }
     }
 }

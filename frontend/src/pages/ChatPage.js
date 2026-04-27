@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import AppSidebarNav from "../components/AppSidebarNav";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,6 +11,7 @@ import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
 /** Экраны уже ~1145px ломают сетку чата — переключаемся на полноэкранные панели */
 const CHAT_NARROW_MAX_PX = 1144;
 export default function ChatPage() {
+    const navigate = useNavigate();
     const { user, token } = useAuth();
     const { hubConnected, hubError, setActiveConversationId, setIncomingMessageHandler, setRefreshConversationsHandler, syncConversationGroups, pendingOpenConversationId, clearPendingOpenConversation } = useChatHub();
     const [conversations, setConversations] = useState([]);
@@ -21,6 +23,7 @@ export default function ChatPage() {
     const [sending, setSending] = useState(false);
     const [status, setStatus] = useState(null);
     const [showShareNotes, setShowShareNotes] = useState(false);
+    const [allowEditShare, setAllowEditShare] = useState(false);
     const [notes, setNotes] = useState([]);
     const [folders, setFolders] = useState([]);
     const [selectedNote, setSelectedNote] = useState(null);
@@ -312,7 +315,8 @@ export default function ChatPage() {
         try {
             await api.shareNote(token, {
                 conversationId: selectedConversationId,
-                noteId
+                noteId,
+                allowEdit: allowEditShare
             });
             setShowShareNotes(false);
             showStatus("Заметка отправлена");
@@ -474,7 +478,7 @@ export default function ChatPage() {
                                                         ? `Ошибка: ${hubError}. Откройте консоль (F12) для подробностей.`
                                                         : hubConnected
                                                             ? "Сообщения приходят в реальном времени"
-                                                            : "Подключение к серверу чата...", children: hubConnected ? "● Подключено" : "○ Нет подключения" }), hubError && (_jsx("span", { style: { fontSize: "0.7rem", color: "#b91c1c", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }, title: hubError, children: hubError })), _jsx("button", { type: "button", className: "btn secondary", onClick: () => setShowShareNotes(!showShareNotes), children: showShareNotes ? "Скрыть" : isNarrowChat ? "Файлы" : "Поделиться файлами" })] })] }), showShareNotes && (_jsxs("div", { style: { padding: "1rem", borderBottom: "1px solid #e5e7eb", maxHeight: "300px", overflowY: "auto" }, children: [_jsx("h3", { style: { marginBottom: "1rem", fontSize: "1rem" }, children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438:" }), folders.map((folder) => {
+                                                            : "Подключение к серверу чата...", children: hubConnected ? "● Подключено" : "○ Нет подключения" }), hubError && (_jsx("span", { style: { fontSize: "0.7rem", color: "#b91c1c", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }, title: hubError, children: hubError })), _jsx("button", { type: "button", className: "btn secondary", onClick: () => setShowShareNotes(!showShareNotes), children: showShareNotes ? "Скрыть" : isNarrowChat ? "Файлы" : "Поделиться файлами" })] })] }), showShareNotes && (_jsxs("div", { style: { padding: "1rem", borderBottom: "1px solid #e5e7eb", maxHeight: "300px", overflowY: "auto" }, children: [_jsx("h3", { style: { marginBottom: "1rem", fontSize: "1rem" }, children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438:" }), _jsxs("label", { style: { display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }, children: [_jsx("input", { type: "checkbox", checked: allowEditShare, onChange: (e) => setAllowEditShare(e.target.checked) }), _jsx("span", { style: { fontSize: "0.9rem" }, children: "\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0441\u043E\u0432\u043C\u0435\u0441\u0442\u043D\u043E\u0435 \u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435" })] }), folders.map((folder) => {
                                             const folderNotes = notes.filter((n) => n.folderId === folder.id);
                                             if (folderNotes.length === 0)
                                                 return null;
@@ -553,7 +557,14 @@ export default function ChatPage() {
                                     flexWrap: "wrap",
                                     gap: "0.5rem",
                                     alignItems: "center"
-                                }, children: [isNarrowChat && (_jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { flexShrink: 0 }, children: "\u2190 \u041A \u0447\u0430\u0442\u0443" })), _jsx("h2", { style: { margin: 0, flex: 1, minWidth: "120px", overflow: "hidden", textOverflow: "ellipsis" }, children: selectedNote.title || "Без названия" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }, children: [_jsxs("button", { type: "button", className: "btn secondary", onClick: () => setShowComments(!showComments), style: { fontSize: "0.9rem" }, children: [showComments ? "Скрыть" : "Показать", " (", comments.length, ")"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { fontSize: "1.5rem", padding: "0.25rem 0.5rem" }, "aria-label": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443", children: "\u00D7" })] })] }), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }, children: [_jsx("div", { ref: notePreviewRef, className: "preview", style: { maxWidth: "100%", wordWrap: "break-word" }, onMouseUp: (e) => {
+                                }, children: [isNarrowChat && (_jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { flexShrink: 0 }, children: "\u2190 \u041A \u0447\u0430\u0442\u0443" })), _jsx("h2", { style: { margin: 0, flex: 1, minWidth: "120px", overflow: "hidden", textOverflow: "ellipsis" }, children: selectedNote.title || "Без названия" }), _jsxs("div", { style: { display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }, children: [_jsx("span", { style: {
+                                                    fontSize: "0.75rem",
+                                                    fontWeight: 600,
+                                                    padding: "0.2rem 0.45rem",
+                                                    borderRadius: "6px",
+                                                    background: selectedNote.canEdit ? "rgba(5, 150, 105, 0.15)" : "rgba(107, 114, 128, 0.15)",
+                                                    color: selectedNote.canEdit ? "#059669" : "#6b7280"
+                                                }, children: selectedNote.canEdit ? "edit" : "read" }), _jsx("button", { type: "button", className: "btn primary", onClick: () => navigate(`/app?noteId=${selectedNote.id}`), style: { fontSize: "0.9rem" }, children: selectedNote.canEdit ? "Редактировать" : "Открыть в заметках" }), _jsxs("button", { type: "button", className: "btn secondary", onClick: () => setShowComments(!showComments), style: { fontSize: "0.9rem" }, children: [showComments ? "Скрыть" : "Показать", " (", comments.length, ")"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { fontSize: "1.5rem", padding: "0.25rem 0.5rem" }, "aria-label": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443", children: "\u00D7" })] })] }), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }, children: [_jsx("div", { ref: notePreviewRef, className: "preview", style: { maxWidth: "100%", wordWrap: "break-word" }, onMouseUp: (e) => {
                                             const selection = window.getSelection();
                                             const selectedString = selection?.toString().trim();
                                             if (!selection || !selectedString) {

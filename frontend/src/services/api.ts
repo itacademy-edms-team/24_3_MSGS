@@ -95,6 +95,12 @@ export const api = {
         ...payload
       }
     }),
+  collabUpdateNote: (token: string, id: number, payload: UpdateNotePayload) =>
+    request<void>(`/notes/${id}/collab-update`, {
+      method: "POST",
+      token,
+      body: payload
+    }),
   deleteNote: (token: string, id: number) =>
     request<void>("/notes/" + id, {
       method: "DELETE",

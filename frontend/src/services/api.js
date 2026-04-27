@@ -54,6 +54,11 @@ export const api = {
             ...payload
         }
     }),
+    collabUpdateNote: (token, id, payload) => request(`/notes/${id}/collab-update`, {
+        method: "POST",
+        token,
+        body: payload
+    }),
     deleteNote: (token, id) => request("/notes/" + id, {
         method: "DELETE",
         token

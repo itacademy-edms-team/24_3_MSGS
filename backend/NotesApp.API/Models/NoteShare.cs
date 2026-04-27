@@ -13,7 +13,7 @@ namespace NotesApp.API.Models
         
         [Required]
         [MaxLength(20)]
-        public string Permission { get; set; } = "read"; // "read" или "write"
+        public string Permission { get; set; } = "read"; // "read" или "edit"
         
         public DateTime SharedAt { get; set; } = DateTime.UtcNow;
         

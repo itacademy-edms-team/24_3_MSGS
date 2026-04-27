@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import AppSidebarNav from "../components/AppSidebarNav";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,6 +15,7 @@ const CHAT_NARROW_MAX_PX = 1144;
 type ChatMobilePane = "list" | "thread" | "note";
 
 export default function ChatPage() {
+  const navigate = useNavigate();
   const { user, token } = useAuth();
   const {
     hubConnected,
@@ -34,6 +36,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [showShareNotes, setShowShareNotes] = useState(false);
+  const [allowEditShare, setAllowEditShare] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -337,7 +340,8 @@ export default function ChatPage() {
     try {
       await api.shareNote(token, {
         conversationId: selectedConversationId,
-        noteId
+        noteId,
+        allowEdit: allowEditShare
       });
       setShowShareNotes(false);
       showStatus("Заметка отправлена");
@@ -630,6 +634,14 @@ export default function ChatPage() {
             {showShareNotes && (
               <div style={{ padding: "1rem", borderBottom: "1px solid #e5e7eb", maxHeight: "300px", overflowY: "auto" }}>
                 <h3 style={{ marginBottom: "1rem", fontSize: "1rem" }}>Выберите заметку для отправки:</h3>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={allowEditShare}
+                    onChange={(e) => setAllowEditShare(e.target.checked)}
+                  />
+                  <span style={{ fontSize: "0.9rem" }}>Разрешить совместное редактирование</span>
+                </label>
                 {folders.map((folder) => {
                   const folderNotes = notes.filter((n) => n.folderId === folder.id);
                   if (folderNotes.length === 0) return null;
@@ -841,6 +853,26 @@ export default function ChatPage() {
                 {selectedNote.title || "Без названия"}
               </h2>
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    padding: "0.2rem 0.45rem",
+                    borderRadius: "6px",
+                    background: selectedNote.canEdit ? "rgba(5, 150, 105, 0.15)" : "rgba(107, 114, 128, 0.15)",
+                    color: selectedNote.canEdit ? "#059669" : "#6b7280"
+                  }}
+                >
+                  {selectedNote.canEdit ? "edit" : "read"}
+                </span>
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => navigate(`/app?noteId=${selectedNote.id}`)}
+                  style={{ fontSize: "0.9rem" }}
+                >
+                  {selectedNote.canEdit ? "Редактировать" : "Открыть в заметках"}
+                </button>
                 <button
                   type="button"
                   className="btn secondary"

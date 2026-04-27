@@ -23,6 +23,15 @@ namespace NotesApp.API.Models
         // Внешние ключи
         public int UserId { get; set; }
         public int? FolderId { get; set; }
+
+        [NotMapped]
+        public bool CanEdit { get; set; } = true;
+
+        [NotMapped]
+        public bool IsShared { get; set; }
+
+        [NotMapped]
+        public string? SharedByUsername { get; set; }
         
         // Навигационные свойства
         [ForeignKey("UserId")]
