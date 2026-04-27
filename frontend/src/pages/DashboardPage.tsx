@@ -94,6 +94,9 @@ export default function DashboardPage() {
   const unlockedProtectedNoteIdsRef = useRef<Set<number>>(new Set());
   const unlockedProtectedFolderIdsRef = useRef<Set<number>>(new Set());
   const [unlockedFoldersVersion, setUnlockedFoldersVersion] = useState(0);
+  const wordUndoStackRef = useRef<string[]>([]);
+  const wordRedoStackRef = useRef<string[]>([]);
+  const applyingWordUndoRef = useRef(false);
   const passwordModalResolverRef = useRef<((value: string | null) => void) | null>(null);
   editorRef.current = editor;
   selectedNoteIdRef.current = selectedNoteId;
@@ -241,6 +244,96 @@ export default function DashboardPage() {
     [token, handleError, openPasswordModal]
   );
 
+  const applyEditorContent = useCallback((nextContent: string) => {
+    const yText = yTextRef.current;
+    if (!yText) {
+      setEditor((prev) => ({ ...prev, content: nextContent }));
+      return;
+    }
+
+    const current = yText.toString();
+    if (current === nextContent) {
+      return;
+    }
+
+    yText.doc?.transact(() => {
+      yText.delete(0, yText.length);
+      yText.insert(0, nextContent);
+    }, "local");
+  }, []);
+
+  const maybePushWordUndoCheckpoint = useCallback((prevContent: string, nextContent: string) => {
+    if (applyingWordUndoRef.current || prevContent === nextContent) {
+      return;
+    }
+
+    const prevLast = prevContent.length > 0 ? prevContent.charAt(prevContent.length - 1) : "";
+    const nextLast = nextContent.length > 0 ? nextContent.charAt(nextContent.length - 1) : "";
+
+    // Чекпоинт начала "нового слова": undo откатывает сразу слово/фрагмент до прошлого пробела.
+    const startsWord =
+      nextContent.length === prevContent.length + 1 &&
+      /\S/.test(nextLast) &&
+      (prevContent.length === 0 || /\s/.test(prevLast));
+
+    if (!startsWord) {
+      return;
+    }
+
+    const stack = wordUndoStackRef.current;
+    wordRedoStackRef.current = [];
+    if (stack.length === 0 || stack[stack.length - 1] !== prevContent) {
+      stack.push(prevContent);
+      if (stack.length > 200) {
+        stack.shift();
+      }
+    }
+  }, []);
+
+  const handleWordUndo = useCallback(() => {
+    if (!canEditSelectedNote) return;
+    const stack = wordUndoStackRef.current;
+    if (stack.length === 0) return;
+    const target = stack.pop();
+    if (target == null) return;
+    wordRedoStackRef.current.push(editorRef.current.content);
+
+    applyingWordUndoRef.current = true;
+    applyEditorContent(target);
+    emitPresenceDebounced(true);
+    requestAnimationFrame(() => {
+      const el = contentTextareaRef.current;
+      if (el) {
+        const caret = target.length;
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+      applyingWordUndoRef.current = false;
+    });
+  }, [applyEditorContent, canEditSelectedNote, emitPresenceDebounced]);
+
+  const handleWordRedo = useCallback(() => {
+    if (!canEditSelectedNote) return;
+    const stack = wordRedoStackRef.current;
+    if (stack.length === 0) return;
+    const target = stack.pop();
+    if (target == null) return;
+    wordUndoStackRef.current.push(editorRef.current.content);
+
+    applyingWordUndoRef.current = true;
+    applyEditorContent(target);
+    emitPresenceDebounced(true);
+    requestAnimationFrame(() => {
+      const el = contentTextareaRef.current;
+      if (el) {
+        const caret = target.length;
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+      applyingWordUndoRef.current = false;
+    });
+  }, [applyEditorContent, canEditSelectedNote, emitPresenceDebounced]);
+
   const ensureFolderUnlocked = useCallback(
     async (folder: Folder): Promise<boolean> => {
       if (!token) return false;
@@ -359,6 +452,8 @@ export default function DashboardPage() {
       loadedNoteIdRef.current = null;
       setEditor(emptyEditor);
       savedSnapshotRef.current = { title: "", content: "" };
+      wordUndoStackRef.current = [];
+      wordRedoStackRef.current = [];
       setComments([]);
       return;
     }
@@ -369,6 +464,8 @@ export default function DashboardPage() {
       const payload = { title: note.title, content: note.content };
       setEditor(payload);
       savedSnapshotRef.current = { ...payload };
+      wordUndoStackRef.current = [payload.content];
+      wordRedoStackRef.current = [];
       void loadComments(selectedNoteId);
     }
   }, [selectedNoteId, notes, loadComments]);
@@ -460,6 +557,8 @@ export default function DashboardPage() {
         loadedNoteIdRef.current = payload.noteId;
         savedSnapshotRef.current = nextEditor;
         setEditor(nextEditor);
+        wordUndoStackRef.current = [nextEditor.content];
+        wordRedoStackRef.current = [];
         showStatus("Заметка обновлена другим участником", 2500);
       }
     });
@@ -1167,6 +1266,24 @@ export default function DashboardPage() {
                 >
                   {showComments ? "Скрыть" : "Показать"} комментарии ({comments.length})
                 </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={handleWordUndo}
+                  disabled={!canEditSelectedNote || wordUndoStackRef.current.length === 0}
+                  title="Откатить последнее слово/фрагмент"
+                >
+                  ↶
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={handleWordRedo}
+                  disabled={!canEditSelectedNote || wordRedoStackRef.current.length === 0}
+                  title="Повторить отмененное изменение"
+                >
+                  ↷
+                </button>
                 <button className="btn success" onClick={handleSaveNote} disabled={saving || !canEditSelectedNote}>
                   {saving ? "Сохраняем..." : "Сохранить"}
                 </button>
@@ -1217,21 +1334,8 @@ export default function DashboardPage() {
                       return;
                     }
                     const nextContent = e.target.value;
-                    const yText = yTextRef.current;
-                    if (!yText) {
-                      setEditor((prev) => ({ ...prev, content: nextContent }));
-                      return;
-                    }
-
-                    const current = yText.toString();
-                    if (current === nextContent) {
-                      return;
-                    }
-
-                    yText.doc?.transact(() => {
-                      yText.delete(0, yText.length);
-                      yText.insert(0, nextContent);
-                    }, "local");
+                    maybePushWordUndoCheckpoint(editorRef.current.content, nextContent);
+                    applyEditorContent(nextContent);
                     emitPresenceDebounced(true);
                   }}
                   onFocus={() => {
