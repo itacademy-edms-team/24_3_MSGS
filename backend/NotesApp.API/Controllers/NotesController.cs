@@ -6,6 +6,8 @@ using NotesApp.API.Data;
 using NotesApp.API.Hubs;
 using NotesApp.API.Models;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace NotesApp.API.Controllers
 {
@@ -40,6 +42,7 @@ namespace NotesApp.API.Controllers
                 note.CanEdit = CanEdit(note, userId);
                 note.IsShared = note.UserId != userId;
                 note.SharedByUsername = note.UserId == userId ? null : note.User?.Username;
+                note.IsPasswordProtected = note.UserId == userId && !string.IsNullOrEmpty(note.PasswordHash);
             }
 
             return notes;
@@ -70,6 +73,7 @@ namespace NotesApp.API.Controllers
             note.CanEdit = CanEdit(note, userId);
             note.IsShared = note.UserId != userId;
             note.SharedByUsername = note.UserId == userId ? null : note.User?.Username;
+            note.IsPasswordProtected = note.UserId == userId && !string.IsNullOrEmpty(note.PasswordHash);
             return note;
         }
 
@@ -84,6 +88,7 @@ namespace NotesApp.API.Controllers
                 Content = createNoteDto.Content,
                 UserId = userId,
                 FolderId = createNoteDto.FolderId,
+                PasswordHash = string.IsNullOrWhiteSpace(createNoteDto.Password) ? null : HashPassword(createNoteDto.Password),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -93,6 +98,7 @@ namespace NotesApp.API.Controllers
             note.CanEdit = true;
             note.IsShared = false;
             note.SharedByUsername = null;
+            note.IsPasswordProtected = !string.IsNullOrEmpty(note.PasswordHash);
 
             return CreatedAtAction("GetNote", new { id = note.Id }, note);
         }
@@ -139,6 +145,50 @@ namespace NotesApp.API.Controllers
                 {
                     throw;
                 }
+            }
+
+            return NoContent();
+        }
+
+        [HttpPost("{id}/password")]
+        public async Task<IActionResult> SetNotePassword(int id, [FromBody] SetNotePasswordDto dto)
+        {
+            var userId = GetCurrentUserId();
+            var note = await _context.Notes.FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
+            if (note == null)
+            {
+                return NotFound();
+            }
+
+            note.PasswordHash = string.IsNullOrWhiteSpace(dto.Password) ? null : HashPassword(dto.Password);
+            note.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpPost("{id}/verify-password")]
+        public async Task<IActionResult> VerifyNotePassword(int id, [FromBody] SetNotePasswordDto dto)
+        {
+            var userId = GetCurrentUserId();
+            var note = await _context.Notes.FirstOrDefaultAsync(n => n.Id == id && n.UserId == userId);
+            if (note == null)
+            {
+                return NotFound();
+            }
+
+            if (string.IsNullOrEmpty(note.PasswordHash))
+            {
+                return NoContent();
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Password))
+            {
+                return BadRequest("Введите пароль заметки");
+            }
+
+            if (!VerifyPassword(dto.Password, note.PasswordHash))
+            {
+                return BadRequest("Неверный пароль заметки");
             }
 
             return NoContent();
@@ -219,6 +269,18 @@ namespace NotesApp.API.Controllers
                  string.Equals(s.Permission, "write", StringComparison.OrdinalIgnoreCase)));
         }
 
+        private static string HashPassword(string password)
+        {
+            using var sha256 = SHA256.Create();
+            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+            return BitConverter.ToString(hashedBytes).Replace("-", "").ToLowerInvariant();
+        }
+
+        private static bool VerifyPassword(string password, string passwordHash)
+        {
+            return HashPassword(password) == passwordHash;
+        }
+
         private int GetCurrentUserId()
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -236,5 +298,10 @@ namespace NotesApp.API.Controllers
         public string Title { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
         public int? FolderId { get; set; }
+    }
+
+    public class SetNotePasswordDto
+    {
+        public string? Password { get; set; }
     }
 }

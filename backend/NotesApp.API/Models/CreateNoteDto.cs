@@ -15,5 +15,9 @@ namespace NotesApp.API.Models
         public int UserId { get; set; }
         
         public int? FolderId { get; set; }
+
+        [MinLength(4)]
+        [MaxLength(100)]
+        public string? Password { get; set; }
     }
 }

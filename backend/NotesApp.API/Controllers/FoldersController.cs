@@ -5,6 +5,8 @@ using NotesApp.API.Data;
 using NotesApp.API.Models;
 using NotesApp.API.Models.Folders;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace NotesApp.API.Controllers
 {
@@ -64,6 +66,7 @@ namespace NotesApp.API.Controllers
             {
                 Name = createFolderDto.Name,
                 ParentId = createFolderDto.ParentId,
+                PasswordHash = string.IsNullOrWhiteSpace(createFolderDto.Password) ? null : HashPassword(createFolderDto.Password),
                 UserId = userId,
                 CreatedAt = DateTime.UtcNow
             };
@@ -100,8 +103,57 @@ namespace NotesApp.API.Controllers
 
             folder.Name = updateFolderDto.Name;
             folder.ParentId = updateFolderDto.ParentId;
+            if (updateFolderDto.ClearPassword)
+            {
+                folder.PasswordHash = null;
+            }
+            else if (!string.IsNullOrWhiteSpace(updateFolderDto.Password))
+            {
+                folder.PasswordHash = HashPassword(updateFolderDto.Password);
+            }
 
             await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpPost("{id}/password")]
+        public async Task<IActionResult> SetFolderPassword(int id, [FromBody] SetFolderPasswordDto dto)
+        {
+            var folder = await FindFolderForCurrentUser(id);
+            if (folder == null)
+            {
+                return NotFound();
+            }
+
+            folder.PasswordHash = string.IsNullOrWhiteSpace(dto.Password) ? null : HashPassword(dto.Password);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpPost("{id}/verify-password")]
+        public async Task<IActionResult> VerifyFolderPassword(int id, [FromBody] SetFolderPasswordDto dto)
+        {
+            var folder = await FindFolderForCurrentUser(id);
+            if (folder == null)
+            {
+                return NotFound();
+            }
+
+            if (string.IsNullOrEmpty(folder.PasswordHash))
+            {
+                return NoContent();
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Password))
+            {
+                return BadRequest("Введите пароль папки");
+            }
+
+            if (!VerifyPassword(dto.Password, folder.PasswordHash))
+            {
+                return BadRequest("Неверный пароль папки");
+            }
+
             return NoContent();
         }
 
@@ -133,8 +185,21 @@ namespace NotesApp.API.Controllers
                 Id = folder.Id,
                 Name = folder.Name,
                 CreatedAt = folder.CreatedAt,
-                ParentId = folder.ParentId
+                ParentId = folder.ParentId,
+                IsPasswordProtected = !string.IsNullOrEmpty(folder.PasswordHash)
             };
+        }
+
+        private static string HashPassword(string password)
+        {
+            using var sha256 = SHA256.Create();
+            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+            return BitConverter.ToString(hashedBytes).Replace("-", "").ToLowerInvariant();
+        }
+
+        private static bool VerifyPassword(string password, string passwordHash)
+        {
+            return HashPassword(password) == passwordHash;
         }
 
         private int GetCurrentUserId()
@@ -147,6 +212,11 @@ namespace NotesApp.API.Controllers
 
             return int.Parse(userIdClaim);
         }
+    }
+
+    public class SetFolderPasswordDto
+    {
+        public string? Password { get; set; }
     }
 }
 

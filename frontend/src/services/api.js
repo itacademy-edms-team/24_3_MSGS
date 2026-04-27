@@ -59,6 +59,16 @@ export const api = {
         token,
         body: payload
     }),
+    setNotePassword: (token, id, password) => request(`/notes/${id}/password`, {
+        method: "POST",
+        token,
+        body: { password: password ?? null }
+    }),
+    verifyNotePassword: (token, id, password) => request(`/notes/${id}/verify-password`, {
+        method: "POST",
+        token,
+        body: { password }
+    }),
     deleteNote: (token, id) => request("/notes/" + id, {
         method: "DELETE",
         token
@@ -75,6 +85,16 @@ export const api = {
         method: "PUT",
         token,
         body: payload
+    }),
+    setFolderPassword: (token, id, password) => request(`/folders/${id}/password`, {
+        method: "POST",
+        token,
+        body: { password: password ?? null }
+    }),
+    verifyFolderPassword: (token, id, password) => request(`/folders/${id}/verify-password`, {
+        method: "POST",
+        token,
+        body: { password }
     }),
     deleteFolder: (token, id) => request("/folders/" + id, {
         method: "DELETE",

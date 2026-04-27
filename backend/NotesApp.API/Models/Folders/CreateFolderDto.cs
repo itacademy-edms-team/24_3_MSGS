@@ -9,6 +9,10 @@ namespace NotesApp.API.Models.Folders
         public string Name { get; set; } = string.Empty;
 
         public int? ParentId { get; set; }
+
+        [MinLength(4)]
+        [MaxLength(100)]
+        public string? Password { get; set; }
     }
 }
 

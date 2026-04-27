@@ -16,6 +16,7 @@ export type Note = {
   canEdit?: boolean;
   isShared?: boolean;
   sharedByUsername?: string | null;
+  isPasswordProtected?: boolean;
 };
 
 export type Folder = {
@@ -23,6 +24,7 @@ export type Folder = {
   name: string;
   createdAt: string;
   parentId: number | null;
+  isPasswordProtected?: boolean;
 };
 
 export type AuthResponse = {
@@ -45,6 +47,7 @@ export type CreateNotePayload = {
   title: string;
   content: string;
   folderId?: number | null;
+  password?: string | null;
 };
 
 export type UpdateNotePayload = {
@@ -56,6 +59,7 @@ export type UpdateNotePayload = {
 export type CreateFolderPayload = {
   name: string;
   parentId?: number | null;
+  password?: string | null;
 };
 
 export type UpdateFolderPayload = CreateFolderPayload;
@@ -117,5 +121,6 @@ export type ShareNotePayload = {
   conversationId: number;
   noteId: number;
   allowEdit?: boolean;
+  notePassword?: string | null;
 };
 

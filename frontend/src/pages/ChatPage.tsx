@@ -335,13 +335,30 @@ export default function ChatPage() {
     }
   };
 
-  const handleShareNote = async (noteId: number) => {
+  const handleShareNote = async (note: Note) => {
     if (!token || !selectedConversationId) return;
+    if (note.isShared) {
+      showStatus("Можно делиться только своими заметками", 5000);
+      return;
+    }
+
+    let notePassword: string | null = null;
+    if (note.isPasswordProtected) {
+      const value = window.prompt("Эта заметка защищена паролем. Введите пароль для отправки:", "");
+      if (value === null) return;
+      notePassword = value.trim();
+      if (!notePassword) {
+        showStatus("Пароль обязателен для отправки защищенной заметки", 5000);
+        return;
+      }
+    }
+
     try {
       await api.shareNote(token, {
         conversationId: selectedConversationId,
-        noteId,
-        allowEdit: allowEditShare
+        noteId: note.id,
+        allowEdit: allowEditShare,
+        notePassword
       });
       setShowShareNotes(false);
       showStatus("Заметка отправлена");
@@ -643,7 +660,7 @@ export default function ChatPage() {
                   <span style={{ fontSize: "0.9rem" }}>Разрешить совместное редактирование</span>
                 </label>
                 {folders.map((folder) => {
-                  const folderNotes = notes.filter((n) => n.folderId === folder.id);
+                  const folderNotes = notes.filter((n) => n.folderId === folder.id && !n.isShared);
                   if (folderNotes.length === 0) return null;
                   return (
                     <div key={folder.id} style={{ marginBottom: "1rem" }}>
@@ -654,7 +671,7 @@ export default function ChatPage() {
                         {folderNotes.map((note) => (
                           <li
                             key={note.id}
-                            onClick={() => handleShareNote(note.id)}
+                            onClick={() => handleShareNote(note)}
                             style={{ cursor: "pointer" }}
                           >
                             <div>
@@ -666,18 +683,18 @@ export default function ChatPage() {
                     </div>
                   );
                 })}
-                {notes.filter((n) => !n.folderId).length > 0 && (
+                {notes.filter((n) => !n.folderId && !n.isShared).length > 0 && (
                   <div style={{ marginBottom: "1rem" }}>
                     <h4 style={{ marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }}>
                       📁 Без папки
                     </h4>
                     <ul className="notes-list">
                       {notes
-                        .filter((n) => !n.folderId)
+                        .filter((n) => !n.folderId && !n.isShared)
                         .map((note) => (
                           <li
                             key={note.id}
-                            onClick={() => handleShareNote(note.id)}
+                            onClick={() => handleShareNote(note)}
                             style={{ cursor: "pointer" }}
                           >
                             <div>

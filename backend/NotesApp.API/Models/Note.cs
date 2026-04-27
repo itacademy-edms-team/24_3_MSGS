@@ -24,6 +24,9 @@ namespace NotesApp.API.Models
         public int UserId { get; set; }
         public int? FolderId { get; set; }
 
+        [JsonIgnore]
+        public string? PasswordHash { get; set; }
+
         [NotMapped]
         public bool CanEdit { get; set; } = true;
 
@@ -32,6 +35,9 @@ namespace NotesApp.API.Models
 
         [NotMapped]
         public string? SharedByUsername { get; set; }
+
+        [NotMapped]
+        public bool IsPasswordProtected { get; set; }
         
         // Навигационные свойства
         [ForeignKey("UserId")]

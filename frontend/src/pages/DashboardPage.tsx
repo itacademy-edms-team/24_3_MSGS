@@ -21,7 +21,7 @@ import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown
 
 type FolderFormState = {
   name: string;
-  parentId: string;
+  password: string;
 };
 
 const emptyEditor = { title: "", content: "" };
@@ -63,8 +63,13 @@ export default function DashboardPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [folderForm, setFolderForm] = useState<FolderFormState>({
     name: "",
-    parentId: ""
+    password: ""
   });
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [passwordModalTitle, setPasswordModalTitle] = useState("");
+  const [passwordModalSubtitle, setPasswordModalSubtitle] = useState("");
+  const [passwordModalValue, setPasswordModalValue] = useState("");
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [comments, setComments] = useState<Message[]>([]);
   const [expandedComments, setExpandedComments] = useState<Set<number>>(new Set());
   const [selectedText, setSelectedText] = useState<{ start: number; end: number } | null>(null);
@@ -86,6 +91,10 @@ export default function DashboardPage() {
   const applyingRemoteYjsRef = useRef(false);
   const typingPresenceRef = useRef(false);
   const presenceDebounceRef = useRef<number | null>(null);
+  const unlockedProtectedNoteIdsRef = useRef<Set<number>>(new Set());
+  const unlockedProtectedFolderIdsRef = useRef<Set<number>>(new Set());
+  const [unlockedFoldersVersion, setUnlockedFoldersVersion] = useState(0);
+  const passwordModalResolverRef = useRef<((value: string | null) => void) | null>(null);
   editorRef.current = editor;
   selectedNoteIdRef.current = selectedNoteId;
 
@@ -96,21 +105,31 @@ export default function DashboardPage() {
   const canEditSelectedNote = selectedNote?.canEdit ?? true;
 
   const filteredNotes = useMemo(() => {
+    const selectedFolder = selectedFolderId
+      ? folders.find((f) => f.id === selectedFolderId) ?? null
+      : null;
+    const selectedFolderLocked = Boolean(
+      selectedFolder &&
+      selectedFolder.isPasswordProtected &&
+      !unlockedProtectedFolderIdsRef.current.has(selectedFolder.id)
+    );
+    const effectiveFolderId = selectedFolderLocked ? null : selectedFolderId;
+
     const result = notes.filter((note) => {
       const matchesShared = showSharedOnly ? Boolean(note.isShared) : true;
-      const matchesFolder = selectedFolderId ? note.folderId === selectedFolderId : true;
+      const matchesFolder = effectiveFolderId ? note.folderId === effectiveFolderId : true;
       const matchesSearch = note.title.toLowerCase().includes(search.toLowerCase());
       return matchesShared && matchesFolder && matchesSearch;
     });
 
-    if (!selectedFolderId) {
+    if (!effectiveFolderId) {
       return result.sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       );
     }
 
     return result;
-  }, [notes, selectedFolderId, showSharedOnly, search]);
+  }, [notes, folders, selectedFolderId, showSharedOnly, search, unlockedFoldersVersion]);
   const sharedNotesCount = useMemo(
     () => filteredNotes.filter((note) => note.isShared).length,
     [filteredNotes]
@@ -168,6 +187,92 @@ export default function DashboardPage() {
     showStatus(message, 6000);
   }, []);
 
+  const openPasswordModal = useCallback((title: string, subtitle: string) => {
+    setPasswordModalTitle(title);
+    setPasswordModalSubtitle(subtitle);
+    setPasswordModalValue("");
+    setPasswordModalVisible(false);
+    setPasswordModalOpen(true);
+    return new Promise<string | null>((resolve) => {
+      passwordModalResolverRef.current = resolve;
+    });
+  }, []);
+
+  const closePasswordModal = useCallback((value: string | null) => {
+    const resolver = passwordModalResolverRef.current;
+    passwordModalResolverRef.current = null;
+    setPasswordModalOpen(false);
+    setPasswordModalValue("");
+    setPasswordModalVisible(false);
+    if (resolver) {
+      resolver(value);
+    }
+  }, []);
+
+  const ensureNoteUnlocked = useCallback(
+    async (note: Note): Promise<boolean> => {
+      if (!token) return false;
+      if (note.isShared) return true;
+      if (!note.isPasswordProtected) return true;
+      if (unlockedProtectedNoteIdsRef.current.has(note.id)) return true;
+
+      const password = await openPasswordModal(
+        `Заметка "${note.title || "Без названия"}"`,
+        "Эта заметка защищена паролем. Введите пароль для открытия."
+      );
+      if (password === null) {
+        return false;
+      }
+      if (!password.trim()) {
+        showStatus("Пароль не введен", 4000);
+        return false;
+      }
+
+      try {
+        await api.verifyNotePassword(token, note.id, password.trim());
+        unlockedProtectedNoteIdsRef.current.add(note.id);
+        showStatus("Заметка разблокирована на время сессии", 2200);
+        return true;
+      } catch (error) {
+        handleError(error);
+        return false;
+      }
+    },
+    [token, handleError, openPasswordModal]
+  );
+
+  const ensureFolderUnlocked = useCallback(
+    async (folder: Folder): Promise<boolean> => {
+      if (!token) return false;
+      if (!folder.isPasswordProtected) return true;
+      if (unlockedProtectedFolderIdsRef.current.has(folder.id)) return true;
+
+      const password = await openPasswordModal(
+        `Папка "${folder.name}"`,
+        "Эта папка защищена паролем. Введите пароль для открытия."
+      );
+      if (password === null) {
+        return false;
+      }
+      if (!password.trim()) {
+        showStatus("Пароль не введен", 4000);
+        return false;
+      }
+
+      try {
+        await api.verifyFolderPassword(token, folder.id, password.trim());
+        unlockedProtectedFolderIdsRef.current.add(folder.id);
+        setUnlockedFoldersVersion((v) => v + 1);
+        showStatus("Папка разблокирована на время сессии", 2200);
+        return true;
+      } catch (error) {
+        handleError(error);
+        return false;
+      }
+    },
+    [token, handleError, openPasswordModal]
+  );
+
   const loadFolders = useCallback(async () => {
     if (!token) return;
     const response = await api.getFolders(token);
@@ -217,8 +322,11 @@ export default function DashboardPage() {
 
     const existing = notes.find((n) => n.id === noteId);
     if (existing) {
-      setSelectedNoteId(noteId);
-      setSearchParams({});
+      void ensureNoteUnlocked(existing).then((ok) => {
+        if (!ok) return;
+        setSelectedNoteId(noteId);
+        setSearchParams({});
+      });
       return;
     }
 
@@ -226,14 +334,17 @@ export default function DashboardPage() {
     void api
       .getNote(token, noteId)
       .then((note) => {
-        setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
-        setSelectedNoteId(note.id);
-        setSearchParams({});
+        void ensureNoteUnlocked(note).then((ok) => {
+          if (!ok) return;
+          setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
+          setSelectedNoteId(note.id);
+          setSearchParams({});
+        });
       })
       .catch(() => {
         showStatus("Не удалось открыть заметку по ссылке", 5000);
       });
-  }, [notes, searchParams, setSearchParams, token]);
+  }, [notes, searchParams, setSearchParams, token, ensureNoteUnlocked]);
 
   useEffect(() => {
     if (!selectedNoteId) {
@@ -429,7 +540,11 @@ export default function DashboardPage() {
     void join().catch(() => {});
   }, [selectedNoteId, collabConnected]);
 
-  const handleSelectNote = (noteId: number) => {
+  const handleSelectNote = async (noteId: number) => {
+    const note = notes.find((n) => n.id === noteId);
+    if (!note) return;
+    const ok = await ensureNoteUnlocked(note);
+    if (!ok) return;
     setSelectedNoteId(noteId);
   };
 
@@ -454,17 +569,19 @@ export default function DashboardPage() {
 
       setSaving(true);
       try {
+        const currentNoteFolderId =
+          notes.find((note) => note.id === selectedNoteId)?.folderId ?? null;
         await api.collabUpdateNote(token, selectedNoteId, {
           title,
           content,
-          folderId: selectedFolderId
+          folderId: currentNoteFolderId
         });
         const updatedAt = new Date().toISOString();
         savedSnapshotRef.current = { title, content };
         setNotes((prev) =>
           prev.map((note) =>
             note.id === selectedNoteId
-              ? { ...note, title, content, folderId: selectedFolderId ?? null, updatedAt }
+              ? { ...note, title, content, folderId: currentNoteFolderId, updatedAt }
               : note
           )
         );
@@ -477,7 +594,7 @@ export default function DashboardPage() {
         setSaving(false);
       }
     },
-    [token, selectedNoteId, selectedFolderId, selectedNote, handleError]
+    [token, selectedNoteId, notes, selectedNote, handleError]
   );
 
   useEffect(() => {
@@ -546,10 +663,10 @@ export default function DashboardPage() {
     try {
       const newFolder = await api.createFolder(token, {
         name: folderForm.name.trim(),
-        parentId: folderForm.parentId ? Number(folderForm.parentId) : null
+        password: folderForm.password.trim() || null
       });
       setFolders((prev) => [...prev, newFolder]);
-      setFolderForm({ name: "", parentId: "" });
+      setFolderForm({ name: "", password: "" });
       showStatus("Папка создана");
     } catch (error) {
       handleError(error);
@@ -564,12 +681,98 @@ export default function DashboardPage() {
     try {
       await api.deleteFolder(token, id);
       setFolders((prev) => prev.filter((folder) => folder.id !== id));
+      unlockedProtectedFolderIdsRef.current.delete(id);
+      setUnlockedFoldersVersion((v) => v + 1);
       setNotes((prev) => prev.filter((note) => note.folderId !== id));
       if (selectedFolderId === id) {
         setSelectedFolderId(null);
         setShowSharedOnly(false);
       }
       showStatus("Папка удалена");
+    } catch (error) {
+      handleError(error);
+    }
+  };
+
+  const handleSetFolderPassword = async (folderId: number, isProtected: boolean) => {
+    if (!token) return;
+    const promptMessage = isProtected
+      ? "Введите новый пароль для папки (или оставьте пусто, чтобы снять пароль):"
+      : "Введите пароль для папки (минимум 4 символа):";
+    const value = window.prompt(promptMessage, "");
+    if (value === null) return;
+    const password = value.trim();
+    if (password && password.length < 4) {
+      showStatus("Пароль папки должен быть не короче 4 символов", 5000);
+      return;
+    }
+
+    try {
+      await api.setFolderPassword(token, folderId, password || null);
+      if (password) {
+        unlockedProtectedFolderIdsRef.current.add(folderId);
+      } else {
+        unlockedProtectedFolderIdsRef.current.delete(folderId);
+      }
+      setUnlockedFoldersVersion((v) => v + 1);
+      setFolders((prev) =>
+        prev.map((f) =>
+          f.id === folderId
+            ? { ...f, isPasswordProtected: Boolean(password) }
+            : f
+        )
+      );
+      showStatus(password ? "Пароль папки обновлен" : "Пароль папки снят");
+    } catch (error) {
+      handleError(error);
+    }
+  };
+
+  const handleSelectFolder = async (folder: Folder) => {
+    const ok = await ensureFolderUnlocked(folder);
+    if (!ok) return;
+    setSelectedFolderId(folder.id);
+    setShowSharedOnly(false);
+    setSearch("");
+    // Защитный рефреш после успешной разблокировки: убирает "пустой" залипший список.
+    if (token) {
+      try {
+        const refreshed = await api.getNotes(token);
+        setNotes(refreshed);
+      } catch {
+        // Игнорируем: пользователь уже в нужной папке, локальное состояние может быть актуальным.
+      }
+    }
+  };
+
+  const handleSetNotePassword = async () => {
+    if (!token || !selectedNoteId || !selectedNote || selectedNote.isShared) return;
+    const promptMessage = selectedNote.isPasswordProtected
+      ? "Введите новый пароль заметки (или оставьте пусто, чтобы снять пароль):"
+      : "Введите пароль для заметки (минимум 4 символа):";
+    const value = window.prompt(promptMessage, "");
+    if (value === null) return;
+    const password = value.trim();
+    if (password && password.length < 4) {
+      showStatus("Пароль заметки должен быть не короче 4 символов", 5000);
+      return;
+    }
+
+    try {
+      await api.setNotePassword(token, selectedNoteId, password || null);
+      if (password) {
+        unlockedProtectedNoteIdsRef.current.add(selectedNoteId);
+      } else {
+        unlockedProtectedNoteIdsRef.current.delete(selectedNoteId);
+      }
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === selectedNoteId
+            ? { ...n, isPasswordProtected: Boolean(password) }
+            : n
+        )
+      );
+      showStatus(password ? "Пароль заметки обновлен" : "Пароль заметки снят");
     } catch (error) {
       handleError(error);
     }
@@ -716,25 +919,24 @@ export default function DashboardPage() {
             <span className="badge">{folders.length}</span>
           </div>
 
-          <form className="folder-form" onSubmit={handleCreateFolder}>
+          <form className="folder-form" onSubmit={handleCreateFolder} autoComplete="off">
             <input
               type="text"
+              name="folder_name"
+              autoComplete="off"
               placeholder="Название папки"
               value={folderForm.name}
               onChange={(e) => setFolderForm((prev) => ({ ...prev, name: e.target.value }))}
               required
             />
-            <select
-              value={folderForm.parentId}
-              onChange={(e) => setFolderForm((prev) => ({ ...prev, parentId: e.target.value }))}
-            >
-              <option value="">Корневая папка</option>
-              {folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.name}
-                </option>
-              ))}
-            </select>
+            <input
+              type="password"
+              name="folder_password"
+              autoComplete="new-password"
+              placeholder="Пароль папки (опционально)"
+              value={folderForm.password}
+              onChange={(e) => setFolderForm((prev) => ({ ...prev, password: e.target.value }))}
+            />
             <button type="submit" className="btn secondary">
               Создать
             </button>
@@ -766,8 +968,7 @@ export default function DashboardPage() {
                 key={folder.id}
                 className={selectedFolderId === folder.id ? "active" : ""}
                 onClick={() => {
-                  setSelectedFolderId(folder.id);
-                  setShowSharedOnly(false);
+                  void handleSelectFolder(folder);
                 }}
               >
                 <span>{folder.name}</span>
@@ -775,6 +976,17 @@ export default function DashboardPage() {
                   <span className="badge light">
                     {notes.filter((note) => note.folderId === folder.id).length}
                   </span>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    title={folder.isPasswordProtected ? "Сменить/снять пароль папки" : "Установить пароль папки"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSetFolderPassword(folder.id, Boolean(folder.isPasswordProtected));
+                    }}
+                  >
+                    {folder.isPasswordProtected ? "🔒" : "🔓"}
+                  </button>
                   <button
                     className="icon-btn"
                     type="button"
@@ -818,6 +1030,8 @@ export default function DashboardPage() {
             />
             <input
               type="search"
+              name="notes_search"
+              autoComplete="off"
               placeholder="Поиск..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -857,6 +1071,7 @@ export default function DashboardPage() {
                 <p className="note-title">{note.title || "Без названия"}</p>
                 <p className="note-meta">
                   {new Date(note.updatedAt).toLocaleString()} • {folderName(note.folderId ?? null)}
+                  {note.isPasswordProtected ? " • 🔒 пароль" : ""}
                   {note.isShared
                     ? ` • доступ от ${note.sharedByUsername || "пользователя"} • ${note.canEdit ? "edit" : "read"}`
                     : ""}
@@ -936,6 +1151,16 @@ export default function DashboardPage() {
                 >
                   Скачать .md
                 </button>
+                {!selectedNote.isShared && (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={handleSetNotePassword}
+                    title={selectedNote.isPasswordProtected ? "Сменить/снять пароль заметки" : "Установить пароль заметки"}
+                  >
+                    {selectedNote.isPasswordProtected ? "🔒 Пароль" : "🔓 Пароль"}
+                  </button>
+                )}
                 <button
                   className="btn secondary"
                   onClick={() => setShowComments(!showComments)}
@@ -1155,6 +1380,78 @@ export default function DashboardPage() {
       {status && (
         <div className="toast">
           <span>{status}</span>
+        </div>
+      )}
+      {passwordModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(16, 24, 40, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "1rem"
+          }}
+          onClick={() => closePasswordModal(null)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "440px",
+              background: "#fff",
+              borderRadius: "12px",
+              boxShadow: "0 12px 32px rgba(15, 23, 42, 0.24)",
+              padding: "1rem"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 0.5rem 0" }}>{passwordModalTitle}</h3>
+            <p style={{ margin: "0 0 0.75rem 0", color: "#667085", fontSize: "0.9rem" }}>
+              {passwordModalSubtitle}
+            </p>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input
+                autoFocus
+                type={passwordModalVisible ? "text" : "password"}
+                name="unlock_password"
+                autoComplete="new-password"
+                value={passwordModalValue}
+                onChange={(e) => setPasswordModalValue(e.target.value)}
+                placeholder="Введите пароль"
+                style={{ flex: 1 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    closePasswordModal(passwordModalValue.trim() || null);
+                  }
+                  if (e.key === "Escape") {
+                    closePasswordModal(null);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setPasswordModalVisible((prev) => !prev)}
+                title={passwordModalVisible ? "Скрыть пароль" : "Показать пароль"}
+              >
+                {passwordModalVisible ? "🙈" : "👁"}
+              </button>
+            </div>
+            <div style={{ marginTop: "0.85rem", display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+              <button type="button" className="btn ghost" onClick={() => closePasswordModal(null)}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => closePasswordModal(passwordModalValue.trim() || null)}
+              >
+                Открыть
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

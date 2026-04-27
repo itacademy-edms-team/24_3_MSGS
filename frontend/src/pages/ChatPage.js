@@ -309,14 +309,30 @@ export default function ChatPage() {
             setSending(false);
         }
     };
-    const handleShareNote = async (noteId) => {
+    const handleShareNote = async (note) => {
         if (!token || !selectedConversationId)
             return;
+        if (note.isShared) {
+            showStatus("Можно делиться только своими заметками", 5000);
+            return;
+        }
+        let notePassword = null;
+        if (note.isPasswordProtected) {
+            const value = window.prompt("Эта заметка защищена паролем. Введите пароль для отправки:", "");
+            if (value === null)
+                return;
+            notePassword = value.trim();
+            if (!notePassword) {
+                showStatus("Пароль обязателен для отправки защищенной заметки", 5000);
+                return;
+            }
+        }
         try {
             await api.shareNote(token, {
                 conversationId: selectedConversationId,
-                noteId,
-                allowEdit: allowEditShare
+                noteId: note.id,
+                allowEdit: allowEditShare,
+                notePassword
             });
             setShowShareNotes(false);
             showStatus("Заметка отправлена");
@@ -479,13 +495,13 @@ export default function ChatPage() {
                                                         : hubConnected
                                                             ? "Сообщения приходят в реальном времени"
                                                             : "Подключение к серверу чата...", children: hubConnected ? "● Подключено" : "○ Нет подключения" }), hubError && (_jsx("span", { style: { fontSize: "0.7rem", color: "#b91c1c", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }, title: hubError, children: hubError })), _jsx("button", { type: "button", className: "btn secondary", onClick: () => setShowShareNotes(!showShareNotes), children: showShareNotes ? "Скрыть" : isNarrowChat ? "Файлы" : "Поделиться файлами" })] })] }), showShareNotes && (_jsxs("div", { style: { padding: "1rem", borderBottom: "1px solid #e5e7eb", maxHeight: "300px", overflowY: "auto" }, children: [_jsx("h3", { style: { marginBottom: "1rem", fontSize: "1rem" }, children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438:" }), _jsxs("label", { style: { display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }, children: [_jsx("input", { type: "checkbox", checked: allowEditShare, onChange: (e) => setAllowEditShare(e.target.checked) }), _jsx("span", { style: { fontSize: "0.9rem" }, children: "\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0441\u043E\u0432\u043C\u0435\u0441\u0442\u043D\u043E\u0435 \u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435" })] }), folders.map((folder) => {
-                                            const folderNotes = notes.filter((n) => n.folderId === folder.id);
+                                            const folderNotes = notes.filter((n) => n.folderId === folder.id && !n.isShared);
                                             if (folderNotes.length === 0)
                                                 return null;
-                                            return (_jsxs("div", { style: { marginBottom: "1rem" }, children: [_jsxs("h4", { style: { marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }, children: ["\uD83D\uDCC1 ", folder.name] }), _jsx("ul", { className: "notes-list", children: folderNotes.map((note) => (_jsx("li", { onClick: () => handleShareNote(note.id), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] }, folder.id));
-                                        }), notes.filter((n) => !n.folderId).length > 0 && (_jsxs("div", { style: { marginBottom: "1rem" }, children: [_jsx("h4", { style: { marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }, children: "\uD83D\uDCC1 \u0411\u0435\u0437 \u043F\u0430\u043F\u043A\u0438" }), _jsx("ul", { className: "notes-list", children: notes
-                                                        .filter((n) => !n.folderId)
-                                                        .map((note) => (_jsx("li", { onClick: () => handleShareNote(note.id), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] })), notes.length === 0 && (_jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438" }))] })), _jsxs("div", { ref: messagesScrollRef, style: { flex: 1, overflowY: "auto", padding: "1rem" }, children: [messages.map((message) => {
+                                            return (_jsxs("div", { style: { marginBottom: "1rem" }, children: [_jsxs("h4", { style: { marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }, children: ["\uD83D\uDCC1 ", folder.name] }), _jsx("ul", { className: "notes-list", children: folderNotes.map((note) => (_jsx("li", { onClick: () => handleShareNote(note), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] }, folder.id));
+                                        }), notes.filter((n) => !n.folderId && !n.isShared).length > 0 && (_jsxs("div", { style: { marginBottom: "1rem" }, children: [_jsx("h4", { style: { marginBottom: "0.5rem", fontSize: "0.9rem", color: "#4c3df7", fontWeight: 600 }, children: "\uD83D\uDCC1 \u0411\u0435\u0437 \u043F\u0430\u043F\u043A\u0438" }), _jsx("ul", { className: "notes-list", children: notes
+                                                        .filter((n) => !n.folderId && !n.isShared)
+                                                        .map((note) => (_jsx("li", { onClick: () => handleShareNote(note), style: { cursor: "pointer" }, children: _jsx("div", { children: _jsx("p", { className: "note-title", children: note.title || "Без названия" }) }) }, note.id))) })] })), notes.length === 0 && (_jsx("p", { className: "empty-state", children: "\u041D\u0435\u0442 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0434\u043B\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438" }))] })), _jsxs("div", { ref: messagesScrollRef, style: { flex: 1, overflowY: "auto", padding: "1rem" }, children: [messages.map((message) => {
                                             const handleNoteClick = async () => {
                                                 if (!token || !message.noteId)
                                                     return;

@@ -7,6 +7,8 @@ using NotesApp.API.Hubs;
 using NotesApp.API.Models;
 using NotesApp.API.Models.Messages;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace NotesApp.API.Controllers
 {
@@ -230,6 +232,19 @@ namespace NotesApp.API.Controllers
                 return Forbid("Вы можете делиться только своими заметками");
             }
 
+            if (!string.IsNullOrEmpty(note.PasswordHash))
+            {
+                if (string.IsNullOrWhiteSpace(dto.NotePassword))
+                {
+                    return BadRequest("Для отправки этой заметки введите пароль");
+                }
+
+                if (!VerifyPassword(dto.NotePassword, note.PasswordHash))
+                {
+                    return BadRequest("Неверный пароль заметки");
+                }
+            }
+
             // Проверяем доступ к чату
             var conversation = await _context.Conversations
                 .FirstOrDefaultAsync(c => c.Id == dto.ConversationId && (c.User1Id == userId || c.User2Id == userId));
@@ -306,6 +321,14 @@ namespace NotesApp.API.Controllers
 
             return int.Parse(userIdClaim);
         }
+
+        private static bool VerifyPassword(string password, string passwordHash)
+        {
+            using var sha256 = SHA256.Create();
+            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+            var computed = BitConverter.ToString(hashedBytes).Replace("-", "").ToLowerInvariant();
+            return computed == passwordHash;
+        }
     }
 
     public class CreateMessageDto
@@ -322,6 +345,8 @@ namespace NotesApp.API.Controllers
         public int ConversationId { get; set; }
         public int NoteId { get; set; }
         public bool AllowEdit { get; set; }
+        public string? NotePassword { get; set; }
     }
+
 }
 

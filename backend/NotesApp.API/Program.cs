@@ -137,6 +137,8 @@ INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
 VALUES ('20260224170000_AddConversationReadState', '9.0.10')
 ON CONFLICT (""MigrationId"") DO NOTHING;
 ");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Notes"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" text;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Folders"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" text;");
     }
     catch (Exception ex)
     {

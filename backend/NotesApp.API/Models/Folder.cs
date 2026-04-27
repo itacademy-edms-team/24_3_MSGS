@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace NotesApp.API.Models
 {
@@ -16,6 +17,9 @@ namespace NotesApp.API.Models
         // Внешние ключи
         public int UserId { get; set; }
         public int? ParentId { get; set; }
+
+        [JsonIgnore]
+        public string? PasswordHash { get; set; }
         
         // Навигационные свойства
         [ForeignKey("UserId")]
