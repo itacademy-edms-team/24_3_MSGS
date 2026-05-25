@@ -461,6 +461,46 @@ textarea:focus,
   margin-bottom: 0.3rem;
 }
 
+.preview .collab-remote-highlight {
+  position: relative;
+  display: inline;
+  border-radius: 4px;
+  padding: 0 0.1em;
+  animation: collab-flash-fade 1.8s ease-out forwards;
+}
+
+.preview .collab-remote-label {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1d2939;
+  background: #fff;
+  border: 1px solid rgba(76, 61, 247, 0.35);
+  border-radius: 999px;
+  vertical-align: baseline;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.preview .collab-remote-highlight-inner {
+  display: inline;
+}
+
+@keyframes collab-flash-fade {
+  0% {
+    filter: brightness(1.05);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.92;
+  }
+}
+
 .preview .note-comment-inline-popover-text {
   color: #374151;
   white-space: pre-wrap;

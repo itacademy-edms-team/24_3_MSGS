@@ -79,7 +79,8 @@ public class NotesCollabHub : Hub
             {
                 noteId,
                 updateBase64,
-                userId
+                userId,
+                username = GetCurrentUsername()
             });
     }
 

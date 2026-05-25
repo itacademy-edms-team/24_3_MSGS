@@ -54,7 +54,7 @@ export function findPlainRangeInRendered(fullText, markdown, selStart, selEnd) {
     }
     return { plainStart: startInFull, plainEnd: endInFull };
 }
-function createRangeFromPlainOffsets(root, plainStart, plainEnd) {
+export function createRangeFromPlainOffsets(root, plainStart, plainEnd) {
     if (plainEnd <= plainStart)
         return null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);

@@ -62,7 +62,7 @@ export function findPlainRangeInRendered(
   return { plainStart: startInFull, plainEnd: endInFull };
 }
 
-function createRangeFromPlainOffsets(
+export function createRangeFromPlainOffsets(
   root: HTMLElement,
   plainStart: number,
   plainEnd: number

@@ -219,6 +219,8 @@ namespace NotesApp.API.Controllers
             existingNote.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
+            var updater = await _context.Users.FindAsync(userId);
+
             await _notesHubContext.Clients
                 .Group($"note_{existingNote.Id}")
                 .SendAsync("NotePatched", new
@@ -228,7 +230,8 @@ namespace NotesApp.API.Controllers
                     content = existingNote.Content,
                     folderId = existingNote.FolderId,
                     updatedAt = existingNote.UpdatedAt,
-                    updatedByUserId = userId
+                    updatedByUserId = userId,
+                    updatedByUsername = updater?.Username ?? $"user-{userId}"
                 });
 
             return NoContent();

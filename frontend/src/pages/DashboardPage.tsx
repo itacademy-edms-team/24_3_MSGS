@@ -21,6 +21,11 @@ import { useVoiceAssistant } from "../voice/VoiceAssistantContext";
 import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
 import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
 import {
+  applyCollabRemoteHighlights,
+  computeMarkdownInsertions,
+  type CollabRemoteFlash
+} from "../utils/noteCollabHighlights";
+import {
   findNoteByTitle,
   looksLikeIncompleteCommand,
   looksLikeVoiceCommand,
@@ -39,6 +44,7 @@ const emptyEditor = { title: "", content: "" };
 const NEW_NOTE_PLACEHOLDER = "## Добро пожаловать\n\nНачните писать здесь ✍️";
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
+const COLLAB_FLASH_MS = 1800;
 
 type NotePatchedEvent = {
   noteId: number;
@@ -47,12 +53,14 @@ type NotePatchedEvent = {
   folderId: number | null;
   updatedAt: string;
   updatedByUserId: number;
+  updatedByUsername?: string;
 };
 
 type YjsUpdateEvent = {
   noteId: number;
   updateBase64: string;
   userId: number;
+  username?: string;
 };
 
 type PresenceChangedEvent = {
@@ -92,6 +100,7 @@ export default function DashboardPage() {
   const [showComments, setShowComments] = useState(false);
   const [collabConnected, setCollabConnected] = useState(false);
   const [activeEditors, setActiveEditors] = useState<string[]>([]);
+  const [collabFlashes, setCollabFlashes] = useState<CollabRemoteFlash[]>([]);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const notePreviewRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -114,6 +123,7 @@ export default function DashboardPage() {
   const wordRedoStackRef = useRef<string[]>([]);
   const applyingWordUndoRef = useRef(false);
   const passwordModalResolverRef = useRef<((value: string | null) => void) | null>(null);
+  const collabFlashTimersRef = useRef<Map<string, number>>(new Map());
   editorRef.current = editor;
   selectedNoteIdRef.current = selectedNoteId;
 
@@ -160,6 +170,38 @@ export default function DashboardPage() {
       setTimeout(() => setStatus(null), timeout);
     }
   };
+
+  const clearCollabFlashes = useCallback(() => {
+    collabFlashTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    collabFlashTimersRef.current.clear();
+    setCollabFlashes([]);
+  }, []);
+
+  const flashRemoteInsertions = useCallback(
+    (oldContent: string, newContent: string, author: string, userId: number) => {
+      const insertions = computeMarkdownInsertions(oldContent, newContent);
+      if (!insertions.length) return;
+
+      const newFlashes: CollabRemoteFlash[] = insertions.map((ins, index) => ({
+        id: `collab-${userId}-${Date.now()}-${index}`,
+        mdStart: ins.start,
+        mdEnd: ins.end,
+        author,
+        userId
+      }));
+
+      setCollabFlashes((prev) => [...prev, ...newFlashes]);
+
+      for (const flash of newFlashes) {
+        const timerId = window.setTimeout(() => {
+          collabFlashTimersRef.current.delete(flash.id);
+          setCollabFlashes((prev) => prev.filter((item) => item.id !== flash.id));
+        }, COLLAB_FLASH_MS);
+        collabFlashTimersRef.current.set(flash.id, timerId);
+      }
+    },
+    []
+  );
 
   const toBase64 = (bytes: Uint8Array) => {
     let binary = "";
@@ -492,7 +534,8 @@ export default function DashboardPage() {
     const el = notePreviewRef.current;
     if (!el) return;
     applyNoteCommentHighlights(el, editor.content, comments, expandedInlineCommentIds);
-  }, [editor.content, comments, expandedInlineCommentIds]);
+    applyCollabRemoteHighlights(el, editor.content, collabFlashes);
+  }, [editor.content, comments, expandedInlineCommentIds, collabFlashes]);
 
   useEffect(() => {
     const root = notePreviewRef.current;
@@ -519,6 +562,11 @@ export default function DashboardPage() {
     root.addEventListener("click", onClick);
     return () => root.removeEventListener("click", onClick);
   }, [selectedNoteId]);
+
+  useEffect(() => {
+    clearCollabFlashes();
+    return () => clearCollabFlashes();
+  }, [selectedNoteId, clearCollabFlashes]);
 
   useEffect(() => {
     if (!selectedNoteId) {
@@ -603,12 +651,19 @@ export default function DashboardPage() {
       );
 
       if (payload.noteId === selectedNoteIdRef.current && payload.updatedByUserId !== user?.id) {
+        const prevContent = editorRef.current.content;
         const nextEditor = { title: payload.title, content: payload.content };
         loadedNoteIdRef.current = payload.noteId;
         savedSnapshotRef.current = nextEditor;
         setEditor(nextEditor);
         wordUndoStackRef.current = [nextEditor.content];
         wordRedoStackRef.current = [];
+        flashRemoteInsertions(
+          prevContent,
+          payload.content,
+          payload.updatedByUsername ?? `user-${payload.updatedByUserId}`,
+          payload.updatedByUserId
+        );
         showStatus("Заметка обновлена другим участником", 2500);
       }
     });
@@ -619,9 +674,18 @@ export default function DashboardPage() {
       if (payload.noteId !== selectedNoteIdRef.current || !yDocRef.current) {
         return;
       }
+      const yText = yTextRef.current;
+      const oldContent = yText?.toString() ?? editorRef.current.content;
       try {
         applyingRemoteYjsRef.current = true;
         Y.applyUpdate(yDocRef.current, fromBase64(payload.updateBase64), "remote");
+        const newContent = yText?.toString() ?? editorRef.current.content;
+        flashRemoteInsertions(
+          oldContent,
+          newContent,
+          payload.username ?? `user-${payload.userId}`,
+          payload.userId
+        );
       } catch {
         // Игнорируем поврежденный update.
       } finally {
@@ -667,7 +731,7 @@ export default function DashboardPage() {
       void connection.stop().catch(() => {});
       collabConnectionRef.current = null;
     };
-  }, [token, user?.id, handleError]);
+  }, [token, user?.id, handleError, flashRemoteInsertions]);
 
   useEffect(() => {
     const connection = collabConnectionRef.current;
