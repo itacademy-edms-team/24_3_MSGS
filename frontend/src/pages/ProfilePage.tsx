@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import AppSidebarNav from "../components/AppSidebarNav";
 import { api } from "../services/api";
 import type { ReceivedShare, SentShareGroup, ShareProfile } from "../types";
+import { useVoiceAssistant } from "../voice/VoiceAssistantContext";
 
 function formatPermission(permission: string) {
   const normalized = permission.toLowerCase();
@@ -15,6 +16,12 @@ function formatPermission(permission: string) {
 
 export default function ProfilePage() {
   const { user, token } = useAuth();
+  const {
+    supported: voiceSupported,
+    alwaysListenEnabled,
+    setAlwaysListenEnabled,
+    wakeListening
+  } = useVoiceAssistant();
   const [profile, setProfile] = useState<ShareProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
@@ -73,6 +80,36 @@ export default function ProfilePage() {
             </p>
           </div>
         </header>
+
+        <div className="profile-settings-block">
+          <h3 className="profile-shares-heading">Голосовой помощник</h3>
+          <label className="profile-settings-toggle">
+            <input
+              type="checkbox"
+              checked={alwaysListenEnabled}
+              disabled={!voiceSupported}
+              onChange={(e) => {
+                setAlwaysListenEnabled(e.target.checked);
+                showStatus(
+                  e.target.checked
+                    ? "Постоянное прослушивание включено — скажите «Голосовой ввод»"
+                    : "Постоянное прослушивание выключено",
+                  5000
+                );
+              }}
+            />
+            <span>Постоянное прослушивание фразы «Голосовой ввод»</span>
+          </label>
+          <p className="note-meta profile-settings-hint">
+            {voiceSupported
+              ? alwaysListenEnabled
+                ? wakeListening
+                  ? "Микрофон активен — произнесите «Голосовой ввод», затем команду (на странице заметок)."
+                  : "После включения откройте раздел «Заметки» или дождитесь доступа к микрофону."
+                : "Без этой опции помощник включается только кнопкой 🎤 на странице заметок."
+              : "Голосовой помощник недоступен в этом браузере (нужен Chrome, Edge или Safari)."}
+          </p>
+        </div>
 
         <div className="profile-shares-grid">
           <div className="profile-shares-column">

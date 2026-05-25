@@ -8,6 +8,7 @@ import DashboardPage from "./pages/DashboardPage";
 import FriendsPage from "./pages/FriendsPage";
 import ChatPage from "./pages/ChatPage";
 import ProfilePage from "./pages/ProfilePage";
+import { VoiceAssistantProvider } from "./voice/VoiceAssistantContext";
 const ProtectedRoute = ({ children }) => {
     const { token, loading } = useAuth();
     if (loading) {
@@ -16,7 +17,7 @@ const ProtectedRoute = ({ children }) => {
     if (!token) {
         return _jsx(Navigate, { to: "/login", replace: true });
     }
-    return children;
+    return _jsx(VoiceAssistantProvider, { children: children });
 };
 const AppRoutes = () => (_jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsx(Route, { path: "/app", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/friends", element: _jsx(ProtectedRoute, { children: _jsx(FriendsPage, {}) }) }), _jsx(Route, { path: "/chat", element: _jsx(ProtectedRoute, { children: _jsx(ChatPage, {}) }) }), _jsx(Route, { path: "/profile", element: _jsx(ProtectedRoute, { children: _jsx(ProfilePage, {}) }) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/app", replace: true }) })] }));
 export default function App() {

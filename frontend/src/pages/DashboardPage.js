@@ -8,9 +8,11 @@ import * as Y from "yjs";
 import { useAuth } from "../auth/AuthContext";
 import { api, HUB_BASE_URL } from "../services/api";
 import AppSidebarNav from "../components/AppSidebarNav";
-import { useVoiceDictation } from "../hooks/useVoiceDictation";
+import { useVoiceAssistant } from "../voice/VoiceAssistantContext";
 import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
 import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
+import { findNoteByTitle, looksLikeIncompleteCommand, looksLikeVoiceCommand, parseVoiceAssistantCommand } from "../utils/voiceAssistantCommands";
+const VOICE_COMMAND_MERGE_MS = 900;
 const emptyEditor = { title: "", content: "" };
 const NEW_NOTE_PLACEHOLDER = "## Добро пожаловать\n\nНачните писать здесь ✍️";
 const AUTOSAVE_DEBOUNCE_MS = 1200;
@@ -667,6 +669,28 @@ export default function DashboardPage() {
             setSaving(false);
         }
     };
+    const createNoteWithTitle = useCallback(async (title) => {
+        if (!token)
+            return;
+        const trimmed = title.trim() || "Без названия";
+        setSaving(true);
+        try {
+            const newNote = await api.createNote(token, {
+                title: trimmed,
+                content: "",
+                folderId: selectedFolderId
+            });
+            setNotes((prev) => [newNote, ...prev]);
+            setSelectedNoteId(newNote.id);
+            showStatus(`Создана заметка «${newNote.title}»`);
+        }
+        catch (error) {
+            handleError(error);
+        }
+        finally {
+            setSaving(false);
+        }
+    }, [token, selectedFolderId, handleError]);
     const handleSaveNote = () => {
         void persistNote();
     };
@@ -902,10 +926,116 @@ export default function DashboardPage() {
             return { ...prev, content: next };
         });
     }, []);
-    const { supported: voiceSupported, listening: voiceListening, toggle: toggleVoiceInput } = useVoiceDictation(appendTranscriptToContent, {
-        lang: "ru-RU",
-        onNotify: showStatus
-    });
+    const voiceListeningRef = useRef(false);
+    const toggleVoiceInputRef = useRef(() => { });
+    const voiceCommandBufferRef = useRef([]);
+    const voiceCommandFlushTimerRef = useRef(null);
+    const executeVoiceCommand = useCallback(async (command) => {
+        switch (command.type) {
+            case "open": {
+                const note = findNoteByTitle(notes, command.title);
+                if (!note) {
+                    showStatus(`Заметка «${command.title}» не найдена`, 5000);
+                    return;
+                }
+                await handleSelectNote(note.id);
+                showStatus(`Открыта заметка «${note.title}»`);
+                break;
+            }
+            case "create":
+                await createNoteWithTitle(command.title);
+                break;
+            case "fill": {
+                if (!selectedNoteId) {
+                    showStatus("Сначала откройте заметку", 5000);
+                    return;
+                }
+                if (!canEditSelectedNote) {
+                    showStatus("У этой заметки нет прав на редактирование", 5000);
+                    return;
+                }
+                if (!voiceListeningRef.current) {
+                    toggleVoiceInputRef.current();
+                }
+                showStatus("Диктуйте текст заметки");
+                break;
+            }
+        }
+    }, [notes, selectedNoteId, canEditSelectedNote, createNoteWithTitle, handleSelectNote]);
+    const executeVoiceCommandRef = useRef(executeVoiceCommand);
+    executeVoiceCommandRef.current = executeVoiceCommand;
+    const flushVoiceCommandBuffer = useCallback(() => {
+        if (voiceCommandFlushTimerRef.current != null) {
+            window.clearTimeout(voiceCommandFlushTimerRef.current);
+            voiceCommandFlushTimerRef.current = null;
+        }
+        const parts = voiceCommandBufferRef.current;
+        voiceCommandBufferRef.current = [];
+        if (!parts.length)
+            return;
+        const combined = parts.join(" ");
+        const command = parseVoiceAssistantCommand(combined);
+        if (command) {
+            void executeVoiceCommandRef.current(command);
+            return;
+        }
+        if (!canEditSelectedNote) {
+            showStatus("Команда не распознана. Примеры: «создай заметку, название»", 5000);
+            return;
+        }
+        showStatus("Не удалось распознать команду — добавлено как текст", 3500);
+        appendTranscriptToContent(combined);
+    }, [appendTranscriptToContent, canEditSelectedNote]);
+    const handleVoiceTranscript = useCallback((text) => {
+        const immediate = parseVoiceAssistantCommand(text);
+        if (immediate) {
+            voiceCommandBufferRef.current = [];
+            if (voiceCommandFlushTimerRef.current != null) {
+                window.clearTimeout(voiceCommandFlushTimerRef.current);
+                voiceCommandFlushTimerRef.current = null;
+            }
+            void executeVoiceCommandRef.current(immediate);
+            return;
+        }
+        const shouldBuffer = voiceCommandBufferRef.current.length > 0 ||
+            looksLikeVoiceCommand(text) ||
+            looksLikeIncompleteCommand(text);
+        if (shouldBuffer) {
+            voiceCommandBufferRef.current.push(text);
+            if (voiceCommandFlushTimerRef.current != null) {
+                window.clearTimeout(voiceCommandFlushTimerRef.current);
+            }
+            voiceCommandFlushTimerRef.current = window.setTimeout(() => {
+                voiceCommandFlushTimerRef.current = null;
+                flushVoiceCommandBuffer();
+            }, VOICE_COMMAND_MERGE_MS);
+            return;
+        }
+        if (!canEditSelectedNote) {
+            showStatus("Нет прав на редактирование — доступны только голосовые команды", 4000);
+            return;
+        }
+        appendTranscriptToContent(text);
+    }, [appendTranscriptToContent, canEditSelectedNote, flushVoiceCommandBuffer]);
+    useEffect(() => {
+        return () => {
+            if (voiceCommandFlushTimerRef.current != null) {
+                window.clearTimeout(voiceCommandFlushTimerRef.current);
+            }
+        };
+    }, []);
+    const { supported: voiceSupported, listening: voiceListening, wakeListening: voiceWakeListening, toggleAssistant: toggleVoiceInput, registerTranscriptHandler } = useVoiceAssistant();
+    voiceListeningRef.current = voiceListening;
+    toggleVoiceInputRef.current = toggleVoiceInput;
+    useEffect(() => {
+        registerTranscriptHandler(handleVoiceTranscript);
+        return () => registerTranscriptHandler(null);
+    }, [handleVoiceTranscript, registerTranscriptHandler]);
+    useEffect(() => {
+        if (!voiceListening && voiceCommandBufferRef.current.length > 0) {
+            flushVoiceCommandBuffer();
+        }
+    }, [voiceListening, flushVoiceCommandBuffer]);
     const handleAddComment = async () => {
         if (!token || !selectedNote || !selectedText || !commentInput.trim())
             return;
@@ -946,7 +1076,13 @@ export default function DashboardPage() {
                                             ? "Поделились со мной"
                                             : selectedFolderId
                                                 ? folderName(selectedFolderId)
-                                                : "Все заметки" }), _jsxs("p", { children: [filteredNotes.length, " \u0437\u0430\u043C\u0435\u0442\u043E\u043A", sharedNotesCount > 0 ? ` • доступных мне: ${sharedNotesCount}` : ""] })] }), _jsxs("div", { className: "panel-actions", children: [_jsx("input", { ref: importInputRef, type: "file", accept: ".md,.markdown,text/markdown,text/plain", multiple: true, style: { display: "none" }, onChange: handleImportMd }), _jsx("input", { type: "search", name: "notes_search", autoComplete: "off", placeholder: "\u041F\u043E\u0438\u0441\u043A...", value: search, onChange: (e) => setSearch(e.target.value) }), _jsx("button", { type: "button", className: "btn ghost", disabled: importing || saving || !token, onClick: () => importInputRef.current?.click(), title: "\u0418\u043C\u043F\u043E\u0440\u0442 \u043E\u0434\u043D\u043E\u0433\u043E \u0438\u043B\u0438 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u0445 .md \u0432 \u0442\u0435\u043A\u0443\u0449\u0443\u044E \u043F\u0430\u043F\u043A\u0443", children: importing ? "Импорт…" : "Импорт .md" }), _jsx("button", { type: "button", className: "btn ghost", disabled: !filteredNotes.length, onClick: handleExportFilteredMd, title: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043A\u0430\u0436\u0434\u0443\u044E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u043C .md", children: "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u0441\u043F\u0438\u0441\u043A\u0430" }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, disabled: saving || showSharedOnly, children: "+ \u041D\u043E\u0432\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430" })] })] }), _jsxs("ul", { className: "notes-list", children: [filteredNotes.map((note) => (_jsxs("li", { className: selectedNoteId === note.id ? "active" : "", onClick: () => handleSelectNote(note.id), children: [_jsxs("div", { children: [_jsx("p", { className: "note-title", children: note.title || "Без названия" }), _jsxs("p", { className: "note-meta", children: [new Date(note.updatedAt).toLocaleString(), " \u2022 ", folderName(note.folderId ?? null), note.isPasswordProtected ? " • 🔒 пароль" : "", note.isShared
+                                                : "Все заметки" }), _jsxs("p", { children: [filteredNotes.length, " \u0437\u0430\u043C\u0435\u0442\u043E\u043A", sharedNotesCount > 0 ? ` • доступных мне: ${sharedNotesCount}` : ""] })] }), _jsxs("div", { className: "panel-actions", children: [_jsx("input", { ref: importInputRef, type: "file", accept: ".md,.markdown,text/markdown,text/plain", multiple: true, style: { display: "none" }, onChange: handleImportMd }), _jsx("input", { type: "search", name: "notes_search", autoComplete: "off", placeholder: "\u041F\u043E\u0438\u0441\u043A...", value: search, onChange: (e) => setSearch(e.target.value) }), _jsx("button", { type: "button", className: voiceListening ? "btn secondary" : voiceWakeListening ? "btn ghost" : "btn ghost", style: voiceWakeListening && !voiceListening
+                                            ? { boxShadow: "0 0 0 2px rgba(5, 150, 105, 0.25)" }
+                                            : undefined, disabled: !voiceSupported, onClick: toggleVoiceInput, title: voiceSupported
+                                            ? voiceWakeListening && !voiceListening
+                                                ? "Ожидание фразы «Голосовой ввод»"
+                                                : "Голосовой помощник: открыть или создать заметку"
+                                            : "Нужен Chrome, Edge или Safari", children: voiceListening ? "⏹ Стоп" : voiceWakeListening ? "👂 Ожидание" : "🎤 Помощник" }), _jsx("button", { type: "button", className: "btn ghost", disabled: importing || saving || !token, onClick: () => importInputRef.current?.click(), title: "\u0418\u043C\u043F\u043E\u0440\u0442 \u043E\u0434\u043D\u043E\u0433\u043E \u0438\u043B\u0438 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u0445 .md \u0432 \u0442\u0435\u043A\u0443\u0449\u0443\u044E \u043F\u0430\u043F\u043A\u0443", children: importing ? "Импорт…" : "Импорт .md" }), _jsx("button", { type: "button", className: "btn ghost", disabled: !filteredNotes.length, onClick: handleExportFilteredMd, title: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043A\u0430\u0436\u0434\u0443\u044E \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u043C .md", children: "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u0441\u043F\u0438\u0441\u043A\u0430" }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, disabled: saving || showSharedOnly, children: "+ \u041D\u043E\u0432\u0430\u044F \u0437\u0430\u043C\u0435\u0442\u043A\u0430" })] })] }), _jsxs("ul", { className: "notes-list", children: [filteredNotes.map((note) => (_jsxs("li", { className: selectedNoteId === note.id ? "active" : "", onClick: () => handleSelectNote(note.id), children: [_jsxs("div", { children: [_jsx("p", { className: "note-title", children: note.title || "Без названия" }), _jsxs("p", { className: "note-meta", children: [new Date(note.updatedAt).toLocaleString(), " \u2022 ", folderName(note.folderId ?? null), note.isPasswordProtected ? " • 🔒 пароль" : "", note.isShared
                                                         ? ` • доступ от ${note.sharedByUsername || "пользователя"} • ${note.canEdit ? "edit" : "read"}`
                                                         : ""] })] }), !note.isShared && (_jsx("button", { className: "icon-btn", onClick: (e) => {
                                             e.stopPropagation();
@@ -969,17 +1105,17 @@ export default function DashboardPage() {
                                                 color: collabConnected ? "#059669" : "#6b7280"
                                             }, title: collabConnected ? "Синхронизация через SignalR + Yjs активна" : "Нет соединения для совместного редактирования", children: collabConnected ? "● Коллаб онлайн" : "○ Коллаб оффлайн" }), _jsxs("span", { style: { fontSize: "0.75rem", color: "#667085" }, children: ["\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u0443\u044E\u0442: ", activeEditors.length ? activeEditors.join(", ") : "никто"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: handleExportCurrentMd, title: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u044D\u0442\u0443 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u043A\u0430\u043A \u0444\u0430\u0439\u043B Markdown", children: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C .md" }), !selectedNote.isShared && (_jsx("button", { type: "button", className: "btn ghost", onClick: handleSetNotePassword, title: selectedNote.isPasswordProtected ? "Сменить/снять пароль заметки" : "Установить пароль заметки", children: selectedNote.isPasswordProtected ? "🔒 Пароль" : "🔓 Пароль" })), _jsxs("button", { className: "btn secondary", onClick: () => setShowComments(!showComments), children: [showComments ? "Скрыть" : "Показать", " \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0438 (", comments.length, ")"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: handleWordUndo, disabled: !canEditSelectedNote || wordUndoStackRef.current.length === 0, title: "\u041E\u0442\u043A\u0430\u0442\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u0441\u043B\u043E\u0432\u043E/\u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442", children: "\u21B6" }), _jsx("button", { type: "button", className: "btn ghost", onClick: handleWordRedo, disabled: !canEditSelectedNote || wordRedoStackRef.current.length === 0, title: "\u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u044C \u043E\u0442\u043C\u0435\u043D\u0435\u043D\u043D\u043E\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435", children: "\u21B7" }), _jsx("button", { className: "btn success", onClick: handleSaveNote, disabled: saving || !canEditSelectedNote, children: saving ? "Сохраняем..." : "Сохранить" })] })] }), _jsxs("div", { className: "editor-columns", children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%" }, children: [_jsxs("div", { style: {
                                                 display: "flex",
-                                                alignItems: "center",
-                                                gap: "0.5rem",
+                                                flexDirection: "column",
+                                                gap: "0.35rem",
                                                 flexShrink: 0,
                                                 marginBottom: "0.35rem"
-                                            }, children: [_jsx("button", { type: "button", className: voiceListening ? "btn secondary" : "btn ghost", style: voiceListening
-                                                        ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
-                                                        : undefined, disabled: !voiceSupported || !canEditSelectedNote, onClick: toggleVoiceInput, title: !voiceSupported
-                                                        ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
-                                                        : voiceListening
-                                                            ? "Остановить запись"
-                                                            : "Диктовать текст в позицию курсора", children: voiceListening ? "⏹ Остановить диктовку" : "🎤 Голосовой ввод" }), voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#6b7280" }, children: "\u0413\u043E\u0432\u043E\u0440\u0438\u0442\u0435\u2026" }))] }), _jsx("textarea", { ref: contentTextareaRef, value: editor.content, disabled: !canEditSelectedNote, onChange: (e) => {
+                                            }, children: [_jsxs("div", { style: { display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }, children: [_jsx("button", { type: "button", className: voiceListening ? "btn secondary" : "btn ghost", style: voiceListening
+                                                                ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
+                                                                : undefined, disabled: !voiceSupported, onClick: toggleVoiceInput, title: !voiceSupported
+                                                                ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
+                                                                : voiceListening
+                                                                    ? "Остановить запись"
+                                                                    : "Голосовой ввод и помощник: команды или диктовка текста", children: voiceListening ? "⏹ Остановить" : "🎤 Голосовой помощник" }), voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#6b7280" }, children: "\u0421\u043B\u0443\u0448\u0430\u044E \u043A\u043E\u043C\u0430\u043D\u0434\u044B\u2026" })), voiceWakeListening && !voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#059669" }, children: "\u0421\u043A\u0430\u0436\u0438\u0442\u0435 \u00AB\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434\u00BB\u2026" }))] }), _jsx("p", { className: "note-meta", style: { margin: 0, lineHeight: 1.35 }, children: "\u041A\u043E\u043C\u0430\u043D\u0434\u044B (\u043C\u043E\u0436\u043D\u043E \u0431\u0435\u0437 \u043A\u0430\u0432\u044B\u0447\u0435\u043A, \u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043F\u044F\u0442\u0443\u044E): \u00AB\u0441\u043E\u0437\u0434\u0430\u0439/\u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443, \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\u00BB, \u00AB\u043E\u0442\u043A\u0440\u043E\u0439/\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443, \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\u00BB, \u00AB\u0437\u0430\u043F\u043E\u043B\u043D\u0438 \u0437\u0430\u043C\u0435\u0442\u043A\u0443\u00BB. \u041F\u0440\u0438 \u043E\u0434\u0438\u043D\u0430\u043A\u043E\u0432\u044B\u0445 \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u044F\u0445 \u043E\u0442\u043A\u0440\u043E\u0435\u0442\u0441\u044F \u043D\u0435\u0434\u0430\u0432\u043D\u043E \u0438\u0437\u043C\u0435\u043D\u0451\u043D\u043D\u0430\u044F. \u0412 \u043F\u0440\u043E\u0444\u0438\u043B\u0435 \u043C\u043E\u0436\u043D\u043E \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043F\u043E\u0441\u0442\u043E\u044F\u043D\u043D\u043E\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u0444\u0440\u0430\u0437\u044B \u00AB\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434\u00BB." })] }), _jsx("textarea", { ref: contentTextareaRef, value: editor.content, disabled: !canEditSelectedNote, onChange: (e) => {
                                                 if (!canEditSelectedNote) {
                                                     return;
                                                 }
@@ -1042,7 +1178,7 @@ export default function DashboardPage() {
                                                                             }
                                                                             setExpandedComments(newExpanded);
                                                                         }, style: { fontSize: "0.75rem", padding: "0.25rem 0.5rem" }, children: isExpanded ? "Свернуть" : "Развернуть" }))] }), hasSelection && isExpanded && selectedText && (_jsxs("div", { style: { marginBottom: "0.5rem", padding: "0.5rem", background: "#fff", borderRadius: "4px", border: "1px solid #e5e7eb" }, children: [_jsx("p", { style: { margin: 0, fontSize: "0.75rem", color: "#6b7280", marginBottom: "0.25rem" }, children: "\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043A \u0442\u0435\u043A\u0441\u0442\u0443:" }), _jsxs("p", { style: { margin: 0, fontStyle: "italic", color: "#4c3df7" }, children: ["\"", selectedText, "\""] })] })), _jsx("p", { style: { margin: 0 }, children: comment.content })] }, comment.id));
-                                                })] }))] })] })] })) : (_jsxs("div", { className: "empty-state large", children: [_jsx("p", { children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0438\u043B\u0438 \u0441\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u043D\u043E\u0432\u0443\u044E" }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, children: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443" })] })) }), status && (_jsx("div", { className: "toast", children: _jsx("span", { children: status }) })), passwordModalOpen && (_jsx("div", { style: {
+                                                })] }))] })] })] })) : (_jsxs("div", { className: "empty-state large", children: [_jsx("p", { children: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \u0438\u043B\u0438 \u0441\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u043D\u043E\u0432\u0443\u044E" }), _jsx("p", { className: "note-meta", style: { maxWidth: "28rem", margin: "0 auto 1rem" }, children: "\u0421\u043A\u0430\u0436\u0438\u0442\u0435: \u00AB\u0421\u043E\u0437\u0434\u0430\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \"\u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\"\u00BB \u0438\u043B\u0438 \u00AB\u041E\u0442\u043A\u0440\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0443 \"\u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\"\u00BB \u2014 \u043A\u043D\u043E\u043F\u043A\u0430 \uD83C\uDFA4 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u0432 \u0441\u043F\u0438\u0441\u043A\u0435 \u0437\u0430\u043C\u0435\u0442\u043E\u043A." }), _jsx("button", { className: "btn primary", onClick: handleCreateNote, children: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443" })] })) }), status && (_jsx("div", { className: "toast", children: _jsx("span", { children: status }) })), passwordModalOpen && (_jsx("div", { style: {
                     position: "fixed",
                     inset: 0,
                     background: "rgba(16, 24, 40, 0.45)",

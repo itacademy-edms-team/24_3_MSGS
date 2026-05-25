@@ -8,6 +8,7 @@ import DashboardPage from "./pages/DashboardPage";
 import FriendsPage from "./pages/FriendsPage";
 import ChatPage from "./pages/ChatPage";
 import ProfilePage from "./pages/ProfilePage";
+import { VoiceAssistantProvider } from "./voice/VoiceAssistantContext";
 
 const ProtectedRoute = ({ children }: { children: ReactElement }) => {
   const { token, loading } = useAuth();
@@ -25,7 +26,7 @@ const ProtectedRoute = ({ children }: { children: ReactElement }) => {
     return <Navigate to="/login" replace />;
   }
 
-  return children;
+  return <VoiceAssistantProvider>{children}</VoiceAssistantProvider>;
 };
 
 const AppRoutes = () => (

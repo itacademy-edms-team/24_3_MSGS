@@ -17,9 +17,18 @@ import { useAuth } from "../auth/AuthContext";
 import { api, HUB_BASE_URL } from "../services/api";
 import type { Folder, Note, Message } from "../types";
 import AppSidebarNav from "../components/AppSidebarNav";
-import { useVoiceDictation } from "../hooks/useVoiceDictation";
+import { useVoiceAssistant } from "../voice/VoiceAssistantContext";
 import { downloadMarkdownFile, parseMarkdownImport } from "../utils/noteMarkdown";
 import { applyNoteCommentHighlights } from "../utils/noteCommentHighlights";
+import {
+  findNoteByTitle,
+  looksLikeIncompleteCommand,
+  looksLikeVoiceCommand,
+  parseVoiceAssistantCommand,
+  type VoiceAssistantCommand
+} from "../utils/voiceAssistantCommands";
+
+const VOICE_COMMAND_MERGE_MS = 900;
 
 type FolderFormState = {
   name: string;
@@ -774,6 +783,29 @@ export default function DashboardPage() {
     }
   };
 
+  const createNoteWithTitle = useCallback(
+    async (title: string) => {
+      if (!token) return;
+      const trimmed = title.trim() || "Без названия";
+      setSaving(true);
+      try {
+        const newNote = await api.createNote(token, {
+          title: trimmed,
+          content: "",
+          folderId: selectedFolderId
+        });
+        setNotes((prev) => [newNote, ...prev]);
+        setSelectedNoteId(newNote.id);
+        showStatus(`Создана заметка «${newNote.title}»`);
+      } catch (error) {
+        handleError(error);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [token, selectedFolderId, handleError]
+  );
+
   const handleSaveNote = () => {
     void persistNote();
   };
@@ -1012,11 +1044,142 @@ export default function DashboardPage() {
     });
   }, []);
 
-  const { supported: voiceSupported, listening: voiceListening, toggle: toggleVoiceInput } =
-    useVoiceDictation(appendTranscriptToContent, {
-      lang: "ru-RU",
-      onNotify: showStatus
-    });
+  const voiceListeningRef = useRef(false);
+  const toggleVoiceInputRef = useRef<() => void>(() => {});
+  const voiceCommandBufferRef = useRef<string[]>([]);
+  const voiceCommandFlushTimerRef = useRef<number | null>(null);
+
+  const executeVoiceCommand = useCallback(
+    async (command: VoiceAssistantCommand) => {
+      switch (command.type) {
+        case "open": {
+          const note = findNoteByTitle(notes, command.title);
+          if (!note) {
+            showStatus(`Заметка «${command.title}» не найдена`, 5000);
+            return;
+          }
+          await handleSelectNote(note.id);
+          showStatus(`Открыта заметка «${note.title}»`);
+          break;
+        }
+        case "create":
+          await createNoteWithTitle(command.title);
+          break;
+        case "fill": {
+          if (!selectedNoteId) {
+            showStatus("Сначала откройте заметку", 5000);
+            return;
+          }
+          if (!canEditSelectedNote) {
+            showStatus("У этой заметки нет прав на редактирование", 5000);
+            return;
+          }
+          if (!voiceListeningRef.current) {
+            toggleVoiceInputRef.current();
+          }
+          showStatus("Диктуйте текст заметки");
+          break;
+        }
+      }
+    },
+    [notes, selectedNoteId, canEditSelectedNote, createNoteWithTitle, handleSelectNote]
+  );
+
+  const executeVoiceCommandRef = useRef(executeVoiceCommand);
+  executeVoiceCommandRef.current = executeVoiceCommand;
+
+  const flushVoiceCommandBuffer = useCallback(() => {
+    if (voiceCommandFlushTimerRef.current != null) {
+      window.clearTimeout(voiceCommandFlushTimerRef.current);
+      voiceCommandFlushTimerRef.current = null;
+    }
+    const parts = voiceCommandBufferRef.current;
+    voiceCommandBufferRef.current = [];
+    if (!parts.length) return;
+
+    const combined = parts.join(" ");
+    const command = parseVoiceAssistantCommand(combined);
+    if (command) {
+      void executeVoiceCommandRef.current(command);
+      return;
+    }
+
+    if (!canEditSelectedNote) {
+      showStatus("Команда не распознана. Примеры: «создай заметку, название»", 5000);
+      return;
+    }
+    showStatus("Не удалось распознать команду — добавлено как текст", 3500);
+    appendTranscriptToContent(combined);
+  }, [appendTranscriptToContent, canEditSelectedNote]);
+
+  const handleVoiceTranscript = useCallback(
+    (text: string) => {
+      const immediate = parseVoiceAssistantCommand(text);
+      if (immediate) {
+        voiceCommandBufferRef.current = [];
+        if (voiceCommandFlushTimerRef.current != null) {
+          window.clearTimeout(voiceCommandFlushTimerRef.current);
+          voiceCommandFlushTimerRef.current = null;
+        }
+        void executeVoiceCommandRef.current(immediate);
+        return;
+      }
+
+      const shouldBuffer =
+        voiceCommandBufferRef.current.length > 0 ||
+        looksLikeVoiceCommand(text) ||
+        looksLikeIncompleteCommand(text);
+
+      if (shouldBuffer) {
+        voiceCommandBufferRef.current.push(text);
+        if (voiceCommandFlushTimerRef.current != null) {
+          window.clearTimeout(voiceCommandFlushTimerRef.current);
+        }
+        voiceCommandFlushTimerRef.current = window.setTimeout(() => {
+          voiceCommandFlushTimerRef.current = null;
+          flushVoiceCommandBuffer();
+        }, VOICE_COMMAND_MERGE_MS);
+        return;
+      }
+
+      if (!canEditSelectedNote) {
+        showStatus("Нет прав на редактирование — доступны только голосовые команды", 4000);
+        return;
+      }
+      appendTranscriptToContent(text);
+    },
+    [appendTranscriptToContent, canEditSelectedNote, flushVoiceCommandBuffer]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (voiceCommandFlushTimerRef.current != null) {
+        window.clearTimeout(voiceCommandFlushTimerRef.current);
+      }
+    };
+  }, []);
+
+  const {
+    supported: voiceSupported,
+    listening: voiceListening,
+    wakeListening: voiceWakeListening,
+    toggleAssistant: toggleVoiceInput,
+    registerTranscriptHandler
+  } = useVoiceAssistant();
+
+  voiceListeningRef.current = voiceListening;
+  toggleVoiceInputRef.current = toggleVoiceInput;
+
+  useEffect(() => {
+    registerTranscriptHandler(handleVoiceTranscript);
+    return () => registerTranscriptHandler(null);
+  }, [handleVoiceTranscript, registerTranscriptHandler]);
+
+  useEffect(() => {
+    if (!voiceListening && voiceCommandBufferRef.current.length > 0) {
+      flushVoiceCommandBuffer();
+    }
+  }, [voiceListening, flushVoiceCommandBuffer]);
 
   const handleAddComment = async () => {
     if (!token || !selectedNote || !selectedText || !commentInput.trim()) return;
@@ -1178,6 +1341,26 @@ export default function DashboardPage() {
             />
             <button
               type="button"
+              className={voiceListening ? "btn secondary" : voiceWakeListening ? "btn ghost" : "btn ghost"}
+              style={
+                voiceWakeListening && !voiceListening
+                  ? { boxShadow: "0 0 0 2px rgba(5, 150, 105, 0.25)" }
+                  : undefined
+              }
+              disabled={!voiceSupported}
+              onClick={toggleVoiceInput}
+              title={
+                voiceSupported
+                  ? voiceWakeListening && !voiceListening
+                    ? "Ожидание фразы «Голосовой ввод»"
+                    : "Голосовой помощник: открыть или создать заметку"
+                  : "Нужен Chrome, Edge или Safari"
+              }
+            >
+              {voiceListening ? "⏹ Стоп" : voiceWakeListening ? "👂 Ожидание" : "🎤 Помощник"}
+            </button>
+            <button
+              type="button"
               className="btn ghost"
               disabled={importing || saving || !token}
               onClick={() => importInputRef.current?.click()}
@@ -1336,35 +1519,48 @@ export default function DashboardPage() {
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
+                    flexDirection: "column",
+                    gap: "0.35rem",
                     flexShrink: 0,
                     marginBottom: "0.35rem"
                   }}
                 >
-                  <button
-                    type="button"
-                    className={voiceListening ? "btn secondary" : "btn ghost"}
-                    style={
-                      voiceListening
-                        ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
-                        : undefined
-                    }
-                    disabled={!voiceSupported || !canEditSelectedNote}
-                    onClick={toggleVoiceInput}
-                    title={
-                      !voiceSupported
-                        ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
-                        : voiceListening
-                          ? "Остановить запись"
-                          : "Диктовать текст в позицию курсора"
-                    }
-                  >
-                    {voiceListening ? "⏹ Остановить диктовку" : "🎤 Голосовой ввод"}
-                  </button>
-                  {voiceListening && (
-                    <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>Говорите…</span>
-                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className={voiceListening ? "btn secondary" : "btn ghost"}
+                      style={
+                        voiceListening
+                          ? { boxShadow: "0 0 0 2px rgba(76, 61, 247, 0.35)" }
+                          : undefined
+                      }
+                      disabled={!voiceSupported}
+                      onClick={toggleVoiceInput}
+                      title={
+                        !voiceSupported
+                          ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
+                          : voiceListening
+                            ? "Остановить запись"
+                            : "Голосовой ввод и помощник: команды или диктовка текста"
+                      }
+                    >
+                      {voiceListening ? "⏹ Остановить" : "🎤 Голосовой помощник"}
+                    </button>
+                    {voiceListening && (
+                      <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>Слушаю команды…</span>
+                    )}
+                    {voiceWakeListening && !voiceListening && (
+                      <span style={{ fontSize: "0.8rem", color: "#059669" }}>
+                        Скажите «Голосовой ввод»…
+                      </span>
+                    )}
+                  </div>
+                  <p className="note-meta" style={{ margin: 0, lineHeight: 1.35 }}>
+                    Команды (можно без кавычек, через запятую): «создай/создать заметку, название»,
+                    «открой/открыть заметку, название», «заполни заметку». При одинаковых названиях
+                    откроется недавно изменённая. В профиле можно включить постоянное ожидание фразы
+                    «Голосовой ввод».
+                  </p>
                 </div>
                 <textarea
                   ref={contentTextareaRef}
@@ -1515,6 +1711,10 @@ export default function DashboardPage() {
         ) : (
           <div className="empty-state large">
             <p>Выберите заметку или создайте новую</p>
+            <p className="note-meta" style={{ maxWidth: "28rem", margin: "0 auto 1rem" }}>
+              Скажите: «Создай заметку "название"» или «Открой заметку "название"» — кнопка 🎤
+              Помощник в списке заметок.
+            </p>
             <button className="btn primary" onClick={handleCreateNote}>
               Создать заметку
             </button>
