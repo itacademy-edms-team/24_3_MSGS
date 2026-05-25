@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using NotesApp.API.Configuration;
 using NotesApp.API.Data;
 using NotesApp.API.Hubs;
 using NotesApp.API.Options;
@@ -9,7 +10,11 @@ using NotesApp.API.Services;
 using System.Text;
 using System.Text.Json;
 
+var contentRoot = Directory.GetCurrentDirectory();
+EnvFileLoader.Load(contentRoot);
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 // Add services to the container.
 builder.Services.AddControllers()
@@ -54,6 +59,7 @@ builder.Services.AddDbContext<NotesDbContext>(options =>
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services.Configure<JwtSettings>(jwtSection);
+builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("Smtp"));
 var jwtSettings = jwtSection.Get<JwtSettings>() ?? throw new InvalidOperationException("Jwt настройки не найдены");
 
 builder.Services.AddAuthentication(options =>
@@ -91,6 +97,7 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSignalR()
     .AddJsonProtocol(options =>
     {
@@ -139,6 +146,10 @@ ON CONFLICT (""MigrationId"") DO NOTHING;
 ");
         await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Notes"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" text;");
         await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Folders"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" text;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailConfirmed"" boolean NOT NULL DEFAULT false;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationCodeHash"" text;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationExpiresAt"" timestamp with time zone;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationSentAt"" timestamp with time zone;");
     }
     catch (Exception ex)
     {

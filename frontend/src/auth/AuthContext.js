@@ -50,6 +50,22 @@ export const AuthProvider = ({ children }) => {
         setToken(null);
         localStorage.removeItem(STORAGE_KEY);
     }, []);
+    const refreshUser = useCallback(async () => {
+        if (!token)
+            return;
+        try {
+            const me = await api.getMe(token);
+            setUser(me);
+            const persisted = localStorage.getItem(STORAGE_KEY);
+            if (persisted) {
+                const data = JSON.parse(persisted);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, user: me }));
+            }
+        }
+        catch {
+            /* ignore — профиль обновится при следующем входе */
+        }
+    }, [token]);
     useEffect(() => {
         const handleStorage = (event) => {
             if (event.key === STORAGE_KEY && !event.newValue) {
@@ -66,8 +82,9 @@ export const AuthProvider = ({ children }) => {
         error,
         login,
         register,
-        logout
-    }), [user, token, loading, error, login, register, logout]);
+        logout,
+        refreshUser
+    }), [user, token, loading, error, login, register, logout, refreshUser]);
     return _jsx(AuthContext.Provider, { value: value, children: children });
 };
 // eslint-disable-next-line react-refresh/only-export-components

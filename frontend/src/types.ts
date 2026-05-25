@@ -4,6 +4,14 @@ export type User = {
   email: string;
   createdAt: string;
   lastLoginAt: string | null;
+  emailConfirmed: boolean;
+};
+
+export type EmailVerificationStatus = {
+  emailConfirmed: boolean;
+  email: string;
+  canResend: boolean;
+  resendAvailableInSeconds: number | null;
 };
 
 export type Note = {

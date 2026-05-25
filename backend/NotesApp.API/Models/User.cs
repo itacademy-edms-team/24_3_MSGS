@@ -21,6 +21,14 @@ namespace NotesApp.API.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         
         public DateTime? LastLoginAt { get; set; }
+
+        public bool EmailConfirmed { get; set; }
+
+        public string? EmailVerificationCodeHash { get; set; }
+
+        public DateTime? EmailVerificationExpiresAt { get; set; }
+
+        public DateTime? EmailVerificationSentAt { get; set; }
         
         // Навигационные свойства
         public ICollection<Note> Notes { get; set; } = new List<Note>();

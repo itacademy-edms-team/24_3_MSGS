@@ -1,0 +1,6 @@
+{
+  "Smtp": {
+    "FromEmail": "your@gmail.com",
+    "AppPassword": "xxxx xxxx xxxx xxxx"
+  }
+}

@@ -18,6 +18,7 @@ type AuthContextValue = {
   login: (payload: LoginPayload) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -87,6 +88,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem(STORAGE_KEY);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    if (!token) return;
+    try {
+      const me = await api.getMe(token);
+      setUser(me);
+      const persisted = localStorage.getItem(STORAGE_KEY);
+      if (persisted) {
+        const data = JSON.parse(persisted) as Persisted;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, user: me }));
+      }
+    } catch {
+      /* ignore — профиль обновится при следующем входе */
+    }
+  }, [token]);
+
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (event.key === STORAGE_KEY && !event.newValue) {
@@ -105,9 +121,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       error,
       login,
       register,
-      logout
+      logout,
+      refreshUser
     }),
-    [user, token, loading, error, login, register, logout]
+    [user, token, loading, error, login, register, logout, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

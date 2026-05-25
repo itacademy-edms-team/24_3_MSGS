@@ -16,13 +16,24 @@ namespace NotesApp.API.Controllers
     [Route("api/[controller]")]
     public class UsersController : ControllerBase
     {
+        private const int VerificationCodeLifetimeMinutes = 15;
+        private const int ResendCooldownSeconds = 60;
+
         private readonly NotesDbContext _context;
         private readonly ITokenService _tokenService;
+        private readonly IEmailSender _emailSender;
+        private readonly ILogger<UsersController> _logger;
 
-        public UsersController(NotesDbContext context, ITokenService tokenService)
+        public UsersController(
+            NotesDbContext context,
+            ITokenService tokenService,
+            IEmailSender emailSender,
+            ILogger<UsersController> logger)
         {
             _context = context;
             _tokenService = tokenService;
+            _emailSender = emailSender;
+            _logger = logger;
         }
 
         [AllowAnonymous]
@@ -103,6 +114,114 @@ namespace NotesApp.API.Controllers
             return ToUserDto(user);
         }
 
+        [HttpGet("me/email/status")]
+        public async Task<ActionResult<EmailVerificationStatusDto>> GetEmailVerificationStatus()
+        {
+            var user = await _context.Users.FindAsync(GetCurrentUserId());
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            return BuildEmailStatus(user);
+        }
+
+        [HttpPost("me/email/send-code")]
+        public async Task<IActionResult> SendEmailVerificationCode()
+        {
+            var user = await _context.Users.FindAsync(GetCurrentUserId());
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            if (user.EmailConfirmed)
+            {
+                return BadRequest("Email уже подтверждён");
+            }
+
+            if (user.EmailVerificationSentAt.HasValue)
+            {
+                var elapsed = DateTime.UtcNow - user.EmailVerificationSentAt.Value;
+                if (elapsed.TotalSeconds < ResendCooldownSeconds)
+                {
+                    var wait = ResendCooldownSeconds - (int)elapsed.TotalSeconds;
+                    return StatusCode(429, $"Повторная отправка будет доступна через {wait} сек.");
+                }
+            }
+
+            var code = Random.Shared.Next(0, 1_000_000).ToString("D6");
+            user.EmailVerificationCodeHash = HashPassword(code);
+            user.EmailVerificationExpiresAt = DateTime.UtcNow.AddMinutes(VerificationCodeLifetimeMinutes);
+            user.EmailVerificationSentAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            var subject = "Код подтверждения email — Notes App";
+            var html = $@"
+<p>Здравствуйте, {System.Net.WebUtility.HtmlEncode(user.Username)}!</p>
+<p>Ваш код подтверждения email:</p>
+<p style=""font-size:28px;font-weight:bold;letter-spacing:6px;"">{code}</p>
+<p>Код действует {VerificationCodeLifetimeMinutes} минут.</p>
+<p>Если вы не запрашивали подтверждение, проигнорируйте это письмо.</p>";
+
+            try
+            {
+                await _emailSender.SendAsync(user.Email, subject, html);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "SMTP send failed for user {UserId}", user.Id);
+                return StatusCode(503, ex.Message);
+            }
+
+            return Ok(new { message = "Код отправлен на вашу почту" });
+        }
+
+        [HttpPost("me/email/confirm")]
+        public async Task<ActionResult<UserDto>> ConfirmEmail([FromBody] ConfirmEmailDto dto)
+        {
+            var user = await _context.Users.FindAsync(GetCurrentUserId());
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            if (user.EmailConfirmed)
+            {
+                return BadRequest("Email уже подтверждён");
+            }
+
+            if (string.IsNullOrEmpty(user.EmailVerificationCodeHash) ||
+                !user.EmailVerificationExpiresAt.HasValue)
+            {
+                return BadRequest("Сначала запросите код подтверждения");
+            }
+
+            if (user.EmailVerificationExpiresAt.Value < DateTime.UtcNow)
+            {
+                return BadRequest("Срок действия кода истёк. Запросите новый код.");
+            }
+
+            var normalizedCode = dto.Code.Trim();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(normalizedCode, @"^\d{6}$"))
+            {
+                return BadRequest("Код должен состоять из 6 цифр");
+            }
+
+            if (HashPassword(normalizedCode) != user.EmailVerificationCodeHash)
+            {
+                return BadRequest("Неверный код подтверждения");
+            }
+
+            user.EmailConfirmed = true;
+            user.EmailVerificationCodeHash = null;
+            user.EmailVerificationExpiresAt = null;
+            user.EmailVerificationSentAt = null;
+            await _context.SaveChangesAsync();
+
+            return ToUserDto(user);
+        }
+
         // GET: api/users/5
         [HttpGet("{id}")]
         public async Task<ActionResult<UserDto>> GetUser(int id)
@@ -132,8 +251,17 @@ namespace NotesApp.API.Controllers
                 return Forbid();
             }
 
+            var emailChanged = !string.Equals(user.Email, updateUserDto.Email, StringComparison.OrdinalIgnoreCase);
             user.Username = updateUserDto.Username;
             user.Email = updateUserDto.Email;
+
+            if (emailChanged)
+            {
+                user.EmailConfirmed = false;
+                user.EmailVerificationCodeHash = null;
+                user.EmailVerificationExpiresAt = null;
+                user.EmailVerificationSentAt = null;
+            }
 
             if (!string.IsNullOrWhiteSpace(updateUserDto.Password))
             {
@@ -207,7 +335,32 @@ namespace NotesApp.API.Controllers
                 Username = user.Username,
                 Email = user.Email,
                 CreatedAt = user.CreatedAt,
-                LastLoginAt = user.LastLoginAt
+                LastLoginAt = user.LastLoginAt,
+                EmailConfirmed = user.EmailConfirmed
+            };
+        }
+
+        private static EmailVerificationStatusDto BuildEmailStatus(User user)
+        {
+            var canResend = true;
+            int? waitSeconds = null;
+
+            if (user.EmailVerificationSentAt.HasValue && !user.EmailConfirmed)
+            {
+                var elapsed = DateTime.UtcNow - user.EmailVerificationSentAt.Value;
+                if (elapsed.TotalSeconds < ResendCooldownSeconds)
+                {
+                    canResend = false;
+                    waitSeconds = ResendCooldownSeconds - (int)elapsed.TotalSeconds;
+                }
+            }
+
+            return new EmailVerificationStatusDto
+            {
+                EmailConfirmed = user.EmailConfirmed,
+                Email = user.Email,
+                CanResend = user.EmailConfirmed || canResend,
+                ResendAvailableInSeconds = user.EmailConfirmed ? null : waitSeconds
             };
         }
 

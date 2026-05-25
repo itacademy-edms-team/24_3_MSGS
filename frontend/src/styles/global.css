@@ -585,6 +585,44 @@ textarea:focus,
   line-height: 1.45;
 }
 
+.email-confirmed-badge {
+  color: #0d7a4a;
+  font-weight: 500;
+}
+
+.email-unconfirmed-badge {
+  color: #b54708;
+  font-weight: 500;
+}
+
+.profile-email-actions {
+  margin-top: 1rem;
+}
+
+.profile-email-confirm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.profile-email-code-input {
+  width: 8.5rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 1.25rem;
+  letter-spacing: 0.35rem;
+  text-align: center;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font-family: inherit;
+}
+
+.profile-email-code-input:focus {
+  outline: 2px solid #4c3df7;
+  border-color: #4c3df7;
+}
+
 .profile-recipients-list {
   list-style: none;
   padding: 0;

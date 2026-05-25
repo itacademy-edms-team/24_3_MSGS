@@ -163,5 +163,20 @@ export const api = {
     }),
     getShareProfile: (token) => request("/shares/profile", {
         token
+    }),
+    getMe: (token) => request("/users/me", {
+        token
+    }),
+    getEmailVerificationStatus: (token) => request("/users/me/email/status", {
+        token
+    }),
+    sendEmailVerificationCode: (token) => request("/users/me/email/send-code", {
+        method: "POST",
+        token
+    }),
+    confirmEmail: (token, code) => request("/users/me/email/confirm", {
+        method: "POST",
+        token,
+        body: { code }
     })
 };

@@ -13,6 +13,7 @@ import type {
   RegisterPayload,
   SendFriendRequestPayload,
   ShareNotePayload,
+  EmailVerificationStatus,
   ShareProfile,
   UpdateFolderPayload,
   UpdateNotePayload,
@@ -231,6 +232,25 @@ export const api = {
   getShareProfile: (token: string) =>
     request<ShareProfile>("/shares/profile", {
       token
+    }),
+  getMe: (token: string) =>
+    request<User>("/users/me", {
+      token
+    }),
+  getEmailVerificationStatus: (token: string) =>
+    request<EmailVerificationStatus>("/users/me/email/status", {
+      token
+    }),
+  sendEmailVerificationCode: (token: string) =>
+    request<{ message: string }>("/users/me/email/send-code", {
+      method: "POST",
+      token
+    }),
+  confirmEmail: (token: string, code: string) =>
+    request<User>("/users/me/email/confirm", {
+      method: "POST",
+      token,
+      body: { code }
     })
 };
 
