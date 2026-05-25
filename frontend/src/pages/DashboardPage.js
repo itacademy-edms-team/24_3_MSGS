@@ -902,18 +902,51 @@ export default function DashboardPage() {
             setImporting(false);
         }
     };
-    const appendTranscriptToContent = useCallback((text) => {
+    const insertAtCursor = useCallback((piece, addLeadingSpace = false) => {
         setEditor((prev) => {
             const ta = contentTextareaRef.current;
             const start = ta?.selectionStart ?? prev.content.length;
             const end = ta?.selectionEnd ?? prev.content.length;
             const before = prev.content.slice(0, start);
             const after = prev.content.slice(end);
-            const needsSpace = before.length > 0 &&
+            const needsSpace = addLeadingSpace &&
+                before.length > 0 &&
                 !/\s$/.test(before) &&
-                text.length > 0 &&
-                !/^\s/.test(text);
-            const piece = (needsSpace ? " " : "") + text;
+                piece.length > 0 &&
+                !/^\s/.test(piece);
+            const insert = (needsSpace ? " " : "") + piece;
+            const next = before + insert + after;
+            const caret = before.length + insert.length;
+            requestAnimationFrame(() => {
+                const el = contentTextareaRef.current;
+                if (el) {
+                    el.focus();
+                    el.setSelectionRange(caret, caret);
+                }
+            });
+            return { ...prev, content: next };
+        });
+    }, []);
+    const appendTranscriptToContent = useCallback((text) => {
+        insertAtCursor(text, true);
+    }, [insertAtCursor]);
+    const insertListAtCursor = useCallback((kind, items) => {
+        setEditor((prev) => {
+            const ta = contentTextareaRef.current;
+            const start = ta?.selectionStart ?? prev.content.length;
+            const end = ta?.selectionEnd ?? prev.content.length;
+            const before = prev.content.slice(0, start);
+            const after = prev.content.slice(end);
+            const needsBreak = before.length > 0 && !before.endsWith("\n");
+            const lead = needsBreak ? "\n" : "";
+            let piece;
+            if (items?.length) {
+                const lines = items.map((item, index) => kind === "ordered" ? `${index + 1}. ${item}` : `- ${item}`);
+                piece = `${lead}${lines.join("\n")}\n`;
+            }
+            else {
+                piece = kind === "ordered" ? `${lead}1. ` : `${lead}- `;
+            }
             const next = before + piece + after;
             const caret = before.length + piece.length;
             requestAnimationFrame(() => {
@@ -926,6 +959,17 @@ export default function DashboardPage() {
             return { ...prev, content: next };
         });
     }, []);
+    const requireEditableNote = useCallback(() => {
+        if (!selectedNoteId) {
+            showStatus("Сначала откройте заметку", 5000);
+            return false;
+        }
+        if (!canEditSelectedNote) {
+            showStatus("У этой заметки нет прав на редактирование", 5000);
+            return false;
+        }
+        return true;
+    }, [selectedNoteId, canEditSelectedNote]);
     const voiceListeningRef = useRef(false);
     const toggleVoiceInputRef = useRef(() => { });
     const voiceCommandBufferRef = useRef([]);
@@ -946,22 +990,62 @@ export default function DashboardPage() {
                 await createNoteWithTitle(command.title);
                 break;
             case "fill": {
-                if (!selectedNoteId) {
-                    showStatus("Сначала откройте заметку", 5000);
+                if (!requireEditableNote())
                     return;
-                }
-                if (!canEditSelectedNote) {
-                    showStatus("У этой заметки нет прав на редактирование", 5000);
-                    return;
-                }
                 if (!voiceListeningRef.current) {
                     toggleVoiceInputRef.current();
                 }
                 showStatus("Диктуйте текст заметки");
                 break;
             }
+            case "bold": {
+                if (!requireEditableNote())
+                    return;
+                insertAtCursor(`**${command.text}**`, true);
+                showStatus(`Жирный текст: ${command.text}`);
+                break;
+            }
+            case "italic": {
+                if (!requireEditableNote())
+                    return;
+                insertAtCursor(`*${command.text}*`, true);
+                showStatus(`Курсив: ${command.text}`);
+                break;
+            }
+            case "lineBreak": {
+                if (!requireEditableNote())
+                    return;
+                insertAtCursor(command.kind === "paragraph" ? "\n\n" : "\n", false);
+                showStatus(command.kind === "paragraph" ? "Добавлен абзац" : "Перенос строки");
+                break;
+            }
+            case "bulletList": {
+                if (!requireEditableNote())
+                    return;
+                insertListAtCursor("bullet", command.items);
+                showStatus(command.items?.length
+                    ? `Список: ${command.items.length} пункт(ов)`
+                    : "Маркированный список — введите пункт");
+                break;
+            }
+            case "orderedList": {
+                if (!requireEditableNote())
+                    return;
+                insertListAtCursor("ordered", command.items);
+                showStatus(command.items?.length
+                    ? `Нумерованный список: ${command.items.length} пункт(ов)`
+                    : "Нумерованный список — введите пункт");
+                break;
+            }
         }
-    }, [notes, selectedNoteId, canEditSelectedNote, createNoteWithTitle, handleSelectNote]);
+    }, [
+        notes,
+        createNoteWithTitle,
+        handleSelectNote,
+        requireEditableNote,
+        insertAtCursor,
+        insertListAtCursor
+    ]);
     const executeVoiceCommandRef = useRef(executeVoiceCommand);
     executeVoiceCommandRef.current = executeVoiceCommand;
     const flushVoiceCommandBuffer = useCallback(() => {
@@ -1115,7 +1199,7 @@ export default function DashboardPage() {
                                                                 ? "Голосовой ввод не поддерживается в этом браузере (нужен Chrome, Edge или Safari)"
                                                                 : voiceListening
                                                                     ? "Остановить запись"
-                                                                    : "Голосовой ввод и помощник: команды или диктовка текста", children: voiceListening ? "⏹ Остановить" : "🎤 Голосовой помощник" }), voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#6b7280" }, children: "\u0421\u043B\u0443\u0448\u0430\u044E \u043A\u043E\u043C\u0430\u043D\u0434\u044B\u2026" })), voiceWakeListening && !voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#059669" }, children: "\u0421\u043A\u0430\u0436\u0438\u0442\u0435 \u00AB\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434\u00BB\u2026" }))] }), _jsx("p", { className: "note-meta", style: { margin: 0, lineHeight: 1.35 }, children: "\u041A\u043E\u043C\u0430\u043D\u0434\u044B (\u043C\u043E\u0436\u043D\u043E \u0431\u0435\u0437 \u043A\u0430\u0432\u044B\u0447\u0435\u043A, \u0447\u0435\u0440\u0435\u0437 \u0437\u0430\u043F\u044F\u0442\u0443\u044E): \u00AB\u0441\u043E\u0437\u0434\u0430\u0439/\u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443, \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\u00BB, \u00AB\u043E\u0442\u043A\u0440\u043E\u0439/\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443, \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\u00BB, \u00AB\u0437\u0430\u043F\u043E\u043B\u043D\u0438 \u0437\u0430\u043C\u0435\u0442\u043A\u0443\u00BB. \u041F\u0440\u0438 \u043E\u0434\u0438\u043D\u0430\u043A\u043E\u0432\u044B\u0445 \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u044F\u0445 \u043E\u0442\u043A\u0440\u043E\u0435\u0442\u0441\u044F \u043D\u0435\u0434\u0430\u0432\u043D\u043E \u0438\u0437\u043C\u0435\u043D\u0451\u043D\u043D\u0430\u044F. \u0412 \u043F\u0440\u043E\u0444\u0438\u043B\u0435 \u043C\u043E\u0436\u043D\u043E \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043F\u043E\u0441\u0442\u043E\u044F\u043D\u043D\u043E\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u0444\u0440\u0430\u0437\u044B \u00AB\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434\u00BB." })] }), _jsx("textarea", { ref: contentTextareaRef, value: editor.content, disabled: !canEditSelectedNote, onChange: (e) => {
+                                                                    : "Голосовой ввод и помощник: команды или диктовка текста", children: voiceListening ? "⏹ Остановить" : "🎤 Голосовой помощник" }), voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#6b7280" }, children: "\u0421\u043B\u0443\u0448\u0430\u044E \u043A\u043E\u043C\u0430\u043D\u0434\u044B\u2026" })), voiceWakeListening && !voiceListening && (_jsx("span", { style: { fontSize: "0.8rem", color: "#059669" }, children: "\u0421\u043A\u0430\u0436\u0438\u0442\u0435 \u00AB\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434\u00BB\u2026" }))] }), _jsx("p", { className: "note-meta", style: { margin: 0, lineHeight: 1.35 }, children: "\u041A\u043E\u043C\u0430\u043D\u0434\u044B: \u00AB\u0441\u043E\u0437\u0434\u0430\u0439/\u043E\u0442\u043A\u0440\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0443\u00BB, \u00AB\u0437\u0430\u043F\u043E\u043B\u043D\u0438 \u0437\u0430\u043C\u0435\u0442\u043A\u0443\u00BB, \u0436\u0438\u0440\u043D\u044B\u0439/\u043A\u0443\u0440\u0441\u0438\u0432, \u00AB\u0441\u043F\u0438\u0441\u043E\u043A, \u043F\u0443\u043D\u043A\u0442\u00BB, \u00AB\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A, \u043F\u0443\u043D\u043A\u0442\u00BB, \u00AB\u0430\u0431\u0437\u0430\u0446\u00BB, \u00AB\u043F\u0435\u0440\u0435\u043D\u043E\u0441 \u0441\u0442\u0440\u043E\u043A\u0438\u00BB. \u0412 \u043F\u0440\u043E\u0444\u0438\u043B\u0435 \u2014 \u00AB\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434\u00BB." })] }), _jsx("textarea", { ref: contentTextareaRef, value: editor.content, disabled: !canEditSelectedNote, onChange: (e) => {
                                                 if (!canEditSelectedNote) {
                                                     return;
                                                 }

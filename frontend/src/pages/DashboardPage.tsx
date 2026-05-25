@@ -1018,7 +1018,7 @@ export default function DashboardPage() {
     }
   };
 
-  const appendTranscriptToContent = useCallback((text: string) => {
+  const insertAtCursor = useCallback((piece: string, addLeadingSpace = false) => {
     setEditor((prev) => {
       const ta = contentTextareaRef.current;
       const start = ta?.selectionStart ?? prev.content.length;
@@ -1026,13 +1026,14 @@ export default function DashboardPage() {
       const before = prev.content.slice(0, start);
       const after = prev.content.slice(end);
       const needsSpace =
+        addLeadingSpace &&
         before.length > 0 &&
         !/\s$/.test(before) &&
-        text.length > 0 &&
-        !/^\s/.test(text);
-      const piece = (needsSpace ? " " : "") + text;
-      const next = before + piece + after;
-      const caret = before.length + piece.length;
+        piece.length > 0 &&
+        !/^\s/.test(piece);
+      const insert = (needsSpace ? " " : "") + piece;
+      const next = before + insert + after;
+      const caret = before.length + insert.length;
       requestAnimationFrame(() => {
         const el = contentTextareaRef.current;
         if (el) {
@@ -1043,6 +1044,61 @@ export default function DashboardPage() {
       return { ...prev, content: next };
     });
   }, []);
+
+  const appendTranscriptToContent = useCallback(
+    (text: string) => {
+      insertAtCursor(text, true);
+    },
+    [insertAtCursor]
+  );
+
+  const insertListAtCursor = useCallback(
+    (kind: "bullet" | "ordered", items?: string[]) => {
+      setEditor((prev) => {
+        const ta = contentTextareaRef.current;
+        const start = ta?.selectionStart ?? prev.content.length;
+        const end = ta?.selectionEnd ?? prev.content.length;
+        const before = prev.content.slice(0, start);
+        const after = prev.content.slice(end);
+        const needsBreak = before.length > 0 && !before.endsWith("\n");
+        const lead = needsBreak ? "\n" : "";
+
+        let piece: string;
+        if (items?.length) {
+          const lines = items.map((item, index) =>
+            kind === "ordered" ? `${index + 1}. ${item}` : `- ${item}`
+          );
+          piece = `${lead}${lines.join("\n")}\n`;
+        } else {
+          piece = kind === "ordered" ? `${lead}1. ` : `${lead}- `;
+        }
+
+        const next = before + piece + after;
+        const caret = before.length + piece.length;
+        requestAnimationFrame(() => {
+          const el = contentTextareaRef.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(caret, caret);
+          }
+        });
+        return { ...prev, content: next };
+      });
+    },
+    []
+  );
+
+  const requireEditableNote = useCallback(() => {
+    if (!selectedNoteId) {
+      showStatus("Сначала откройте заметку", 5000);
+      return false;
+    }
+    if (!canEditSelectedNote) {
+      showStatus("У этой заметки нет прав на редактирование", 5000);
+      return false;
+    }
+    return true;
+  }, [selectedNoteId, canEditSelectedNote]);
 
   const voiceListeningRef = useRef(false);
   const toggleVoiceInputRef = useRef<() => void>(() => {});
@@ -1066,23 +1122,61 @@ export default function DashboardPage() {
           await createNoteWithTitle(command.title);
           break;
         case "fill": {
-          if (!selectedNoteId) {
-            showStatus("Сначала откройте заметку", 5000);
-            return;
-          }
-          if (!canEditSelectedNote) {
-            showStatus("У этой заметки нет прав на редактирование", 5000);
-            return;
-          }
+          if (!requireEditableNote()) return;
           if (!voiceListeningRef.current) {
             toggleVoiceInputRef.current();
           }
           showStatus("Диктуйте текст заметки");
           break;
         }
+        case "bold": {
+          if (!requireEditableNote()) return;
+          insertAtCursor(`**${command.text}**`, true);
+          showStatus(`Жирный текст: ${command.text}`);
+          break;
+        }
+        case "italic": {
+          if (!requireEditableNote()) return;
+          insertAtCursor(`*${command.text}*`, true);
+          showStatus(`Курсив: ${command.text}`);
+          break;
+        }
+        case "lineBreak": {
+          if (!requireEditableNote()) return;
+          insertAtCursor(command.kind === "paragraph" ? "\n\n" : "\n", false);
+          showStatus(command.kind === "paragraph" ? "Добавлен абзац" : "Перенос строки");
+          break;
+        }
+        case "bulletList": {
+          if (!requireEditableNote()) return;
+          insertListAtCursor("bullet", command.items);
+          showStatus(
+            command.items?.length
+              ? `Список: ${command.items.length} пункт(ов)`
+              : "Маркированный список — введите пункт"
+          );
+          break;
+        }
+        case "orderedList": {
+          if (!requireEditableNote()) return;
+          insertListAtCursor("ordered", command.items);
+          showStatus(
+            command.items?.length
+              ? `Нумерованный список: ${command.items.length} пункт(ов)`
+              : "Нумерованный список — введите пункт"
+          );
+          break;
+        }
       }
     },
-    [notes, selectedNoteId, canEditSelectedNote, createNoteWithTitle, handleSelectNote]
+    [
+      notes,
+      createNoteWithTitle,
+      handleSelectNote,
+      requireEditableNote,
+      insertAtCursor,
+      insertListAtCursor
+    ]
   );
 
   const executeVoiceCommandRef = useRef(executeVoiceCommand);
@@ -1556,10 +1650,9 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <p className="note-meta" style={{ margin: 0, lineHeight: 1.35 }}>
-                    Команды (можно без кавычек, через запятую): «создай/создать заметку, название»,
-                    «открой/открыть заметку, название», «заполни заметку». При одинаковых названиях
-                    откроется недавно изменённая. В профиле можно включить постоянное ожидание фразы
-                    «Голосовой ввод».
+                    Команды: «создай/открой заметку», «заполни заметку», жирный/курсив, «список, пункт»,
+                    «нумерованный список, пункт», «абзац», «перенос строки». В профиле — «Голосовой
+                    ввод».
                   </p>
                 </div>
                 <textarea
