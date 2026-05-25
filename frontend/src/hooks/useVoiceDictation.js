@@ -30,6 +30,8 @@ export function useVoiceDictation(onFinalTranscript, options) {
     const alwaysListenRef = useRef(alwaysListen);
     const intentionalStopRef = useRef(false);
     const pendingAssistantRestartRef = useRef(false);
+    /** true после onstart, сбрасывается в onend — stop() без start() не вызывает onend */
+    const recognitionRunningRef = useRef(false);
     const heardSpeechRef = useRef(false);
     const silenceTimerRef = useRef(null);
     const restartTimerRef = useRef(null);
@@ -162,8 +164,8 @@ export function useVoiceDictation(onFinalTranscript, options) {
         }
         armSilenceTimer(INITIAL_LISTEN_MS);
         const rec = recognitionRef.current;
-        pendingAssistantRestartRef.current = true;
-        if (rec) {
+        if (rec && recognitionRunningRef.current) {
+            pendingAssistantRestartRef.current = true;
             intentionalStopRef.current = true;
             try {
                 rec.stop();
@@ -249,6 +251,7 @@ export function useVoiceDictation(onFinalTranscript, options) {
             }
         };
         rec.onstart = () => {
+            recognitionRunningRef.current = true;
             intentionalStopRef.current = false;
             syncMicState();
             if (assistantActiveRef.current) {
@@ -256,6 +259,7 @@ export function useVoiceDictation(onFinalTranscript, options) {
             }
         };
         rec.onend = () => {
+            recognitionRunningRef.current = false;
             if (intentionalStopRef.current) {
                 intentionalStopRef.current = false;
                 if (pendingAssistantRestartRef.current) {
@@ -283,6 +287,7 @@ export function useVoiceDictation(onFinalTranscript, options) {
         return () => {
             intentionalStopRef.current = true;
             pendingAssistantRestartRef.current = false;
+            recognitionRunningRef.current = false;
             assistantActiveRef.current = false;
             heardSpeechRef.current = false;
             clearSilenceTimer();
