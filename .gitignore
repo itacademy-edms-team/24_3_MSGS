@@ -217,6 +217,8 @@ Temporary Items
 # Frontend compiled files (if you don't want to commit them)
 frontend/js/app.js
 frontend/js/app.js.map
+# Stale tsc emit in src — Vite resolves .js before .tsx
+frontend/src/**/*.js
 
 # Backup files
 *.bak

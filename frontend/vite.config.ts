@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      extensions: [".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"]
+    },
     server: {
       port: Number(env.VITE_PORT || 5173),
       host: "0.0.0.0",

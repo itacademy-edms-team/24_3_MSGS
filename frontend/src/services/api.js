@@ -160,5 +160,8 @@ export const api = {
         method: "POST",
         token,
         body: payload
+    }),
+    getShareProfile: (token) => request("/shares/profile", {
+        token
     })
 };

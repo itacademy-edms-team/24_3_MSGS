@@ -13,6 +13,7 @@ import type {
   RegisterPayload,
   SendFriendRequestPayload,
   ShareNotePayload,
+  ShareProfile,
   UpdateFolderPayload,
   UpdateNotePayload,
   User
@@ -226,6 +227,10 @@ export const api = {
       method: "POST",
       token,
       body: payload
+    }),
+  getShareProfile: (token: string) =>
+    request<ShareProfile>("/shares/profile", {
+      token
     })
 };
 

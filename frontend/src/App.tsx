@@ -7,6 +7,7 @@ import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
 import FriendsPage from "./pages/FriendsPage";
 import ChatPage from "./pages/ChatPage";
+import ProfilePage from "./pages/ProfilePage";
 
 const ProtectedRoute = ({ children }: { children: ReactElement }) => {
   const { token, loading } = useAuth();
@@ -52,6 +53,14 @@ const AppRoutes = () => (
       element={
         <ProtectedRoute>
           <ChatPage />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/profile"
+      element={
+        <ProtectedRoute>
+          <ProfilePage />
         </ProtectedRoute>
       }
     />

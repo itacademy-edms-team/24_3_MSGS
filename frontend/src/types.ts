@@ -124,3 +124,31 @@ export type ShareNotePayload = {
   notePassword?: string | null;
 };
 
+export type ReceivedShare = {
+  shareId: number;
+  noteId: number;
+  noteTitle: string;
+  ownerUsername: string;
+  permission: string;
+  sharedAt: string;
+};
+
+export type ShareRecipient = {
+  shareId: number;
+  userId: number;
+  username: string;
+  permission: string;
+  sharedAt: string;
+};
+
+export type SentShareGroup = {
+  noteId: number;
+  noteTitle: string;
+  recipients: ShareRecipient[];
+};
+
+export type ShareProfile = {
+  received: ReceivedShare[];
+  sent: SentShareGroup[];
+};
+

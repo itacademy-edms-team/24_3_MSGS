@@ -34,6 +34,9 @@ export default function AppSidebarNav() {
         <NavLink to="/chat" className={navTabClass} style={navLinkStyle}>
           Чаты
         </NavLink>
+        <NavLink to="/profile" className={navTabClass} style={navLinkStyle}>
+          Профиль
+        </NavLink>
         <button type="button" className="btn ghost" onClick={logout} style={{ width: "100%" }}>
           Выйти
         </button>
