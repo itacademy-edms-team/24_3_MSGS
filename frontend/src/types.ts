@@ -14,6 +14,20 @@ export type EmailVerificationStatus = {
   resendAvailableInSeconds: number | null;
 };
 
+export type PasswordResetStatus = {
+  emailConfirmed: boolean;
+  canResend: boolean;
+  resendAvailableInSeconds: number | null;
+  protectedNotesCount: number;
+  protectedFoldersCount: number;
+};
+
+export type PasswordResetResult = {
+  message: string;
+  notesReset: number;
+  foldersReset: number;
+};
+
 export type Note = {
   id: number;
   title: string;

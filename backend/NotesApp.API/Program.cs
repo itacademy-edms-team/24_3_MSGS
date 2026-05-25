@@ -150,6 +150,9 @@ ON CONFLICT (""MigrationId"") DO NOTHING;
         await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationCodeHash"" text;");
         await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationExpiresAt"" timestamp with time zone;");
         await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationSentAt"" timestamp with time zone;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""PasswordResetCodeHash"" text;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""PasswordResetExpiresAt"" timestamp with time zone;");
+        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""PasswordResetSentAt"" timestamp with time zone;");
     }
     catch (Exception ex)
     {

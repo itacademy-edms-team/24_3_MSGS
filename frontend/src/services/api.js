@@ -178,5 +178,17 @@ export const api = {
         method: "POST",
         token,
         body: { code }
+    }),
+    getPasswordResetStatus: (token) => request("/users/me/password-reset/status", {
+        token
+    }),
+    sendPasswordResetCode: (token) => request("/users/me/password-reset/send-code", {
+        method: "POST",
+        token
+    }),
+    confirmPasswordReset: (token, code) => request("/users/me/password-reset/confirm", {
+        method: "POST",
+        token,
+        body: { code }
     })
 };

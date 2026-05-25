@@ -5,6 +5,7 @@ import AppSidebarNav from "../components/AppSidebarNav";
 import { api } from "../services/api";
 import type {
   EmailVerificationStatus,
+  PasswordResetStatus,
   ReceivedShare,
   SentShareGroup,
   ShareProfile
@@ -34,6 +35,12 @@ export default function ProfilePage() {
   const [verificationCode, setVerificationCode] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(0);
+  const [passwordResetStatus, setPasswordResetStatus] = useState<PasswordResetStatus | null>(
+    null
+  );
+  const [passwordResetCode, setPasswordResetCode] = useState("");
+  const [passwordResetBusy, setPasswordResetBusy] = useState(false);
+  const [passwordResetResendCountdown, setPasswordResetResendCountdown] = useState(0);
 
   const showStatus = (message: string, timeout = 4000) => {
     setStatus(message);
@@ -73,12 +80,33 @@ export default function ProfilePage() {
     }
   }, [token]);
 
+  const loadPasswordResetStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await api.getPasswordResetStatus(token);
+      setPasswordResetStatus(data);
+      setPasswordResetResendCountdown(
+        data.resendAvailableInSeconds && data.resendAvailableInSeconds > 0
+          ? data.resendAvailableInSeconds
+          : 0
+      );
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "Не удалось загрузить статус сброса паролей",
+        6000
+      );
+    }
+  }, [token]);
+
   useEffect(() => {
     setLoading(true);
-    void Promise.all([loadProfile(), refreshUser(), loadEmailStatus()]).finally(() =>
-      setLoading(false)
-    );
-  }, [loadProfile, refreshUser, loadEmailStatus]);
+    void Promise.all([
+      loadProfile(),
+      refreshUser(),
+      loadEmailStatus(),
+      loadPasswordResetStatus()
+    ]).finally(() => setLoading(false));
+  }, [loadProfile, refreshUser, loadEmailStatus, loadPasswordResetStatus]);
 
   useEffect(() => {
     if (resendCountdown <= 0) return;
@@ -87,6 +115,14 @@ export default function ProfilePage() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [resendCountdown]);
+
+  useEffect(() => {
+    if (passwordResetResendCountdown <= 0) return;
+    const timer = window.setInterval(() => {
+      setPasswordResetResendCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [passwordResetResendCountdown]);
 
   const handleSendCode = async () => {
     if (!token || emailBusy) return;
@@ -121,6 +157,54 @@ export default function ProfilePage() {
       showStatus(error instanceof Error ? error.message : "Неверный код", 6000);
     } finally {
       setEmailBusy(false);
+    }
+  };
+
+  const handleSendPasswordResetCode = async () => {
+    if (!token || passwordResetBusy) return;
+    setPasswordResetBusy(true);
+    try {
+      const result = await api.sendPasswordResetCode(token);
+      showStatus(result.message, 6000);
+      await loadPasswordResetStatus();
+      setPasswordResetResendCountdown(60);
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "Не удалось отправить код",
+        6000
+      );
+    } finally {
+      setPasswordResetBusy(false);
+    }
+  };
+
+  const handleConfirmPasswordReset = async () => {
+    if (!token || passwordResetBusy) return;
+    const code = passwordResetCode.replace(/\D/g, "").slice(0, 6);
+    if (code.length !== 6) {
+      showStatus("Введите 6-значный код из письма", 5000);
+      return;
+    }
+    if (
+      !window.confirm(
+        "Снять пароли со всех ваших заметок и папок? Это действие нельзя отменить."
+      )
+    ) {
+      return;
+    }
+    setPasswordResetBusy(true);
+    try {
+      const result = await api.confirmPasswordReset(token, code);
+      setPasswordResetCode("");
+      await loadPasswordResetStatus();
+      showStatus(
+        `${result.message}: заметок — ${result.notesReset}, папок — ${result.foldersReset}`,
+        8000
+      );
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : "Не удалось сбросить пароли", 6000);
+    } finally {
+      setPasswordResetBusy(false);
     }
   };
 
@@ -202,6 +286,73 @@ export default function ProfilePage() {
                   onClick={() => void handleConfirmEmail()}
                 >
                   Подтвердить email
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="profile-settings-block">
+          <h3 className="profile-shares-heading">Сброс паролей заметок и папок</h3>
+          {!user?.emailConfirmed && !emailStatus?.emailConfirmed ? (
+            <p className="note-meta profile-settings-hint">
+              Доступно только после подтверждения email. Сначала подтвердите почту выше.
+            </p>
+          ) : (
+            <>
+              <p className="note-meta profile-settings-hint">
+                Снимает пароли со <strong>всех</strong> ваших заметок и папок. Для подтверждения
+                на почту придёт отдельный 6-значный код (не путать с кодом подтверждения email).
+                {passwordResetStatus &&
+                (passwordResetStatus.protectedNotesCount > 0 ||
+                  passwordResetStatus.protectedFoldersCount > 0) ? (
+                  <>
+                    {" "}
+                    Сейчас защищено: заметок — {passwordResetStatus.protectedNotesCount}, папок —{" "}
+                    {passwordResetStatus.protectedFoldersCount}.
+                  </>
+                ) : passwordResetStatus ? (
+                  <> Сейчас нет заметок и папок с паролем.</>
+                ) : null}
+              </p>
+              <div className="profile-email-actions">
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={passwordResetBusy || passwordResetResendCountdown > 0}
+                  onClick={() => void handleSendPasswordResetCode()}
+                >
+                  {passwordResetResendCountdown > 0
+                    ? `Отправить код (${passwordResetResendCountdown} с)`
+                    : "Отправить код на почту"}
+                </button>
+              </div>
+              <div className="profile-email-confirm-row">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  className="profile-email-code-input"
+                  placeholder="000000"
+                  value={passwordResetCode}
+                  disabled={passwordResetBusy}
+                  onChange={(e) =>
+                    setPasswordResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={
+                    passwordResetBusy ||
+                    passwordResetCode.length !== 6 ||
+                    (passwordResetStatus?.protectedNotesCount === 0 &&
+                      passwordResetStatus?.protectedFoldersCount === 0)
+                  }
+                  onClick={() => void handleConfirmPasswordReset()}
+                >
+                  Сбросить все пароли
                 </button>
               </div>
             </>

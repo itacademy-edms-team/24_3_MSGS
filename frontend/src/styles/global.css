@@ -52,6 +52,22 @@ select {
   color: #fff;
 }
 
+.btn.danger {
+  background: #b42318;
+  color: #fff;
+  border-color: #b42318;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: #912018;
+  border-color: #912018;
+}
+
+.btn.danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn.ghost {
   background: transparent;
   color: #475467;

@@ -29,6 +29,12 @@ namespace NotesApp.API.Models
         public DateTime? EmailVerificationExpiresAt { get; set; }
 
         public DateTime? EmailVerificationSentAt { get; set; }
+
+        public string? PasswordResetCodeHash { get; set; }
+
+        public DateTime? PasswordResetExpiresAt { get; set; }
+
+        public DateTime? PasswordResetSentAt { get; set; }
         
         // Навигационные свойства
         public ICollection<Note> Notes { get; set; } = new List<Note>();

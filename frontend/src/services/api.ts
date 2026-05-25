@@ -14,6 +14,8 @@ import type {
   SendFriendRequestPayload,
   ShareNotePayload,
   EmailVerificationStatus,
+  PasswordResetResult,
+  PasswordResetStatus,
   ShareProfile,
   UpdateFolderPayload,
   UpdateNotePayload,
@@ -248,6 +250,21 @@ export const api = {
     }),
   confirmEmail: (token: string, code: string) =>
     request<User>("/users/me/email/confirm", {
+      method: "POST",
+      token,
+      body: { code }
+    }),
+  getPasswordResetStatus: (token: string) =>
+    request<PasswordResetStatus>("/users/me/password-reset/status", {
+      token
+    }),
+  sendPasswordResetCode: (token: string) =>
+    request<{ message: string }>("/users/me/password-reset/send-code", {
+      method: "POST",
+      token
+    }),
+  confirmPasswordReset: (token: string, code: string) =>
+    request<PasswordResetResult>("/users/me/password-reset/confirm", {
       method: "POST",
       token,
       body: { code }
