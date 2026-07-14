@@ -67,7 +67,7 @@ namespace NotesApp.API.Controllers
             // Проверяем доступ: владелец или имеет доступ через шаринг
             if (note.UserId != userId && !note.Shares.Any(s => s.UserId == userId))
             {
-                return Forbid("Нет доступа к этой заметке");
+                return StatusCode(StatusCodes.Status403Forbidden, "Нет доступа к этой заметке");
             }
 
             note.CanEdit = CanEdit(note, userId);

@@ -3646,7 +3646,7 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\roman\\.nuget\\packages\\": {},
+    "C:\\Users\\roman\\AppData\\Local\\Temp\\cursor-sandbox-cache\\2b659d646ddeb98a4a8dd37cc5374537\\nuget": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
@@ -3655,7 +3655,7 @@
       "projectUniqueName": "C:\\Users\\roman\\24_3_MSGS\\backend\\NotesApp.API\\NotesApp.API.csproj",
       "projectName": "NotesApp.API",
       "projectPath": "C:\\Users\\roman\\24_3_MSGS\\backend\\NotesApp.API\\NotesApp.API.csproj",
-      "packagesPath": "C:\\Users\\roman\\.nuget\\packages\\",
+      "packagesPath": "C:\\Users\\roman\\AppData\\Local\\Temp\\cursor-sandbox-cache\\2b659d646ddeb98a4a8dd37cc5374537\\nuget",
       "outputPath": "C:\\Users\\roman\\24_3_MSGS\\backend\\NotesApp.API\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [

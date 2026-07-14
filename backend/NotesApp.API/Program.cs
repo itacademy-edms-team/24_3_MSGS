@@ -53,9 +53,12 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// Добавляем Entity Framework с PostgreSQL
-builder.Services.AddDbContext<NotesDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Добавляем Entity Framework с PostgreSQL (в тестах провайдер подменяется в WebApplicationFactory)
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddDbContext<NotesDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+}
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services.Configure<JwtSettings>(jwtSection);
@@ -123,11 +126,15 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Создать таблицу ConversationReadStates, если её нет (миграция могла не примениться без psql)
+if (!app.Environment.IsEnvironment("Testing"))
+{
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<NotesDbContext>();
     try
     {
+        await db.Database.MigrateAsync();
+
         await db.Database.ExecuteSqlRawAsync(@"
 CREATE TABLE IF NOT EXISTS ""ConversationReadStates"" (
     ""UserId"" integer NOT NULL,
@@ -160,6 +167,7 @@ ON CONFLICT (""MigrationId"") DO NOTHING;
         logger.LogWarning(ex, "EnsureConversationReadStates: {Message}", ex.Message);
     }
 }
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -183,3 +191,5 @@ app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<NotesCollabHub>("/hubs/notes-collab");
 
 app.Run();
+
+public partial class Program { }
