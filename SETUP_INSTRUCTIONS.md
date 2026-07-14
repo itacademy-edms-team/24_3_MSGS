@@ -131,6 +131,8 @@ Workflow `.github/workflows/cd.yml`:
 
 ### Secrets для автодеплоя (опционально)
 
+Включение: repository variable `ENABLE_SSH_DEPLOY` = `true` (задаёт владелец репозитория).
+
 | Secret | Описание |
 |--------|----------|
 | `DEPLOY_HOST` | IP или домен сервера |
