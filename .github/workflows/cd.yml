@@ -94,11 +94,11 @@ jobs:
     name: Deploy to server (optional)
     runs-on: ubuntu-latest
     needs: publish
-    if: ${{ secrets.DEPLOY_HOST != '' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Deploy via SSH
+        if: ${{ secrets.DEPLOY_HOST != '' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
