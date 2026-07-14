@@ -32,7 +32,7 @@ jobs:
         run: dotnet test backend/NotesApp.API.Tests/NotesApp.API.Tests.csproj --no-build -c Release --verbosity normal
 
   frontend:
-    name: Frontend build
+    name: Frontend lint, test & build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +47,14 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Test
+        working-directory: frontend
+        run: npm run test
 
       - name: Build
         working-directory: frontend

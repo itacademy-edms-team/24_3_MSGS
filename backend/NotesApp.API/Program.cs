@@ -125,48 +125,11 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Создать таблицу ConversationReadStates, если её нет (миграция могла не примениться без psql)
 if (!app.Environment.IsEnvironment("Testing"))
 {
-using (var scope = app.Services.CreateScope())
-{
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<NotesDbContext>();
-    try
-    {
-        await db.Database.MigrateAsync();
-
-        await db.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS ""ConversationReadStates"" (
-    ""UserId"" integer NOT NULL,
-    ""ConversationId"" integer NOT NULL,
-    ""LastReadMessageId"" integer NOT NULL,
-    CONSTRAINT ""PK_ConversationReadStates"" PRIMARY KEY (""UserId"", ""ConversationId""),
-    CONSTRAINT ""FK_ConversationReadStates_Conversations_ConversationId"" FOREIGN KEY (""ConversationId"") REFERENCES ""Conversations"" (""Id"") ON DELETE CASCADE,
-    CONSTRAINT ""FK_ConversationReadStates_Users_UserId"" FOREIGN KEY (""UserId"") REFERENCES ""Users"" (""Id"") ON DELETE CASCADE
-);
-");
-        await db.Database.ExecuteSqlRawAsync(@"CREATE INDEX IF NOT EXISTS ""IX_ConversationReadStates_ConversationId"" ON ""ConversationReadStates"" (""ConversationId"");");
-        await db.Database.ExecuteSqlRawAsync(@"
-INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
-VALUES ('20260224170000_AddConversationReadState', '9.0.10')
-ON CONFLICT (""MigrationId"") DO NOTHING;
-");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Notes"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" text;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Folders"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" text;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailConfirmed"" boolean NOT NULL DEFAULT false;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationCodeHash"" text;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationExpiresAt"" timestamp with time zone;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""EmailVerificationSentAt"" timestamp with time zone;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""PasswordResetCodeHash"" text;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""PasswordResetExpiresAt"" timestamp with time zone;");
-        await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Users"" ADD COLUMN IF NOT EXISTS ""PasswordResetSentAt"" timestamp with time zone;");
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogWarning(ex, "EnsureConversationReadStates: {Message}", ex.Message);
-    }
-}
+    await db.Database.MigrateAsync();
 }
 
 // Configure the HTTP request pipeline.

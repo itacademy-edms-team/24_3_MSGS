@@ -1,11 +1,11 @@
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace NotesApp.API.Migrations
 {
     /// <inheritdoc />
-    public partial class AddConversationReadState : Migration
+    public partial class EnsureConversationReadStates : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

@@ -1,4 +1,84 @@
-# 📌 Бэклог приложения заметок (Markdown Notes)
+# Notes App — Markdown-заметки с коллаборацией
+
+React + Vite + TypeScript (frontend), ASP.NET Core 8 + PostgreSQL (backend).
+
+## Быстрый старт (Docker)
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+| Сервис | URL |
+|--------|-----|
+| Frontend | http://localhost:8080 |
+| API | http://localhost:5000 |
+| Swagger | http://localhost:5000/swagger |
+
+SMTP (подтверждение email): добавьте в `.env` или `backend/NotesApp.API/.env` переменные `Smtp__FromEmail` и `Smtp__AppPassword`.
+
+## Локальная разработка
+
+### Backend
+
+```bash
+cd backend/NotesApp.API
+dotnet run --urls "https://localhost:7000;http://localhost:5000"
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_BASE_URL=https://localhost:7000/api
+npm run dev
+```
+
+Подробнее: [SETUP_INSTRUCTIONS.md](./SETUP_INSTRUCTIONS.md)
+
+## Тесты
+
+```bash
+# Backend (19 интеграционных + unit)
+dotnet test backend/NotesApp.API.Tests/NotesApp.API.Tests.csproj
+
+# Frontend (Vitest + Testing Library)
+cd frontend && npm run test
+```
+
+## CI/CD
+
+| Workflow | Триггер | Действия |
+|----------|---------|----------|
+| `ci.yml` | push/PR в `main`/`master` | build + test backend, lint + test + build frontend, сборка Docker |
+| `cd.yml` | тег `v*` (например `v1.0.0`) | публикация образов в GHCR, GitHub Release, опциональный SSH-деплой |
+
+### Релиз и деплой
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+На сервере (после `docker login ghcr.io`):
+
+```bash
+export APP_VERSION=v1.0.0
+export GHCR_OWNER=<ваш-github-логин>
+export POSTGRES_PASSWORD=...
+export JWT_SECRET_KEY=...
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+Опциональный автодеплой: GitHub Secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`.
+
+---
+
+## Бэклог функций
+
+Ниже — план развития приложения.
 
 ## 🔥 Эпики
 - Редактор заметок с Markdown  
@@ -79,13 +159,10 @@
 
 ---
 
-## ⚛️ Фронтенд (React + Vite)
-- Код находится в директории `frontend`, используется стек React 18 + TypeScript + Vite.  
-- Для запуска выполните:
-  ```bash
-  cd frontend
-  npm install
-  npm run dev
-  ```
-- Базовый URL API настраивается через переменную `VITE_API_BASE_URL` (по умолчанию `https://localhost:7000/api`).  
-- Интерфейс включает авторизацию по JWT, управление папками и заметками, Markdown-редактор с предпросмотром и обновлённый адаптивный дизайн.
+## Реализовано дополнительно
+
+- Профиль: подтверждение email, сброс паролей заметок/папок, голосовой помощник  
+- CI: GitHub Actions (build, test, lint, Docker)  
+- CD: публикация в GHCR по тегу `v*`  
+- Backend-тесты: xUnit + WebApplicationFactory (19 тестов)  
+- Frontend-тесты: Vitest + React Testing Library  

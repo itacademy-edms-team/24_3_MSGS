@@ -184,7 +184,7 @@ function parseSingleSegment(segment: string): VoiceAssistantCommand | null {
 function splitIntoSegments(text: string): string[] {
   const normalized = normalizeTranscript(text);
   const bySentence = normalized
-    .split(/\.\s+|\?\s+|\!\s+/)
+    .split(/\.\s+|\?\s+|!\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
 

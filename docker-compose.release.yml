@@ -1,3 +1,6 @@
+# Продакшн-запуск из образов GHCR (после релиза v*).
+# Перед запуском: docker login ghcr.io -u USER -p TOKEN
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,11 +8,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-msgs}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
     healthcheck:
       test:
         [
@@ -19,23 +20,20 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 10s
 
   api:
-    build:
-      context: ./backend/NotesApp.API
-      dockerfile: Dockerfile
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER required}/notes-app-api:${APP_VERSION:?APP_VERSION required}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5000
-      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-msgs};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-msgs};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD}
       Jwt__Issuer: NotesApp
       Jwt__Audience: NotesAppClient
-      Jwt__SecretKey: super_secret_dev_key_1234567890!@#%$$
+      Jwt__SecretKey: ${JWT_SECRET_KEY:?JWT_SECRET_KEY required}
       Jwt__AccessTokenLifetimeMinutes: 60
       Smtp__Host: smtp.gmail.com
       Smtp__Port: 587
@@ -44,19 +42,15 @@ services:
       Smtp__FromEmail: ${Smtp__FromEmail:-}
       Smtp__AppPassword: ${Smtp__AppPassword:-}
     ports:
-      - "5000:5000"
+      - "${API_PORT:-5000}:5000"
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5000/api}
+    image: ghcr.io/${GHCR_OWNER}/notes-app-frontend:${APP_VERSION}
     restart: unless-stopped
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "${FRONTEND_PORT:-8080}:80"
 
 volumes:
   pgdata:

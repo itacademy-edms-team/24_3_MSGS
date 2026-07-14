@@ -1,81 +1,165 @@
-# 🚀 Инструкция по настройке проекта Notes App
+# Инструкция по настройке Notes App
 
-## 📋 Что нужно сделать для запуска проекта:
+## Вариант A: Docker (рекомендуется)
 
-### 1. 🔧 Настройка базы данных PostgreSQL
-
-**В pgAdmin4:**
-1. ✅ Создайте базу данных `msgs` (уже сделано)
-2. 🔑 Узнайте пароль пользователя `postgres` в вашей системе
-
-**В файлах конфигурации:**
-3. Откройте файлы:
-   - `backend/NotesApp.API/appsettings.json`
-   - `backend/NotesApp.API/appsettings.Development.json`
-4. Замените `your_password_here` на реальный пароль PostgreSQL
-
-### 2. 🗄️ Применение миграций базы данных
+### 1. Подготовка
 
 ```bash
-# Перейдите в папку backend
-cd backend/NotesApp.API
+cp .env.example .env
+```
 
-# Примените миграции к базе данных
+При необходимости отредактируйте `.env`:
+
+| Переменная | Назначение |
+|------------|------------|
+| `POSTGRES_PASSWORD` | Пароль БД |
+| `VITE_API_BASE_URL` | URL API для сборки фронтенда (по умолчанию `http://localhost:5000/api`) |
+| `Smtp__FromEmail` | Gmail для отправки кодов |
+| `Smtp__AppPassword` | Пароль приложения Google |
+
+SMTP можно задать и в `backend/NotesApp.API/.env` (см. `.env.example` в той папке).
+
+### 2. Запуск
+
+```bash
+docker compose up --build
+```
+
+### 3. Проверка
+
+| Что | URL |
+|-----|-----|
+| Приложение | http://localhost:8080 |
+| API | http://localhost:5000 |
+| Swagger | http://localhost:5000/swagger |
+
+Миграции БД применяются автоматически при старте API.
+
+---
+
+## Вариант B: Локально без Docker
+
+### 1. PostgreSQL
+
+Создайте БД `msgs` и пользователя. В `backend/NotesApp.API/appsettings.Development.json` укажите строку подключения.
+
+```bash
+cd backend/NotesApp.API
 dotnet ef database update
 ```
 
-### 3. 🖥️ Запуск Backend API
+### 2. Backend
 
 ```bash
-# В папке backend/NotesApp.API
-dotnet run
+cd backend/NotesApp.API
+dotnet run --urls "https://localhost:7000;http://localhost:5000"
 ```
 
-API будет доступен по адресу: `https://localhost:7000`
-
-### 4. 🎨 Настройка и запуск Frontend (React + Vite)
+### 3. Frontend
 
 ```bash
-# Перейдите в папку frontend
 cd frontend
-
-# Установите зависимости
 npm install
-
-# (Опционально) создайте .env с адресом API
-echo VITE_API_BASE_URL=https://localhost:7000/api > .env
-
-# Запуск в dev-режиме
+cp .env.example .env
 npm run dev
-
-# Сборка продакшн-версии
-npm run build
-
-# Просмотр собранной версии
-npm run preview
 ```
 
-Frontend по умолчанию доступен по адресу: `http://localhost:5173` (порт можно изменить в `.env` через `VITE_PORT`).
+По умолчанию: http://localhost:5173, API — `https://localhost:7000/api`.
 
-## 🎯 Ожидаемый результат:
+---
 
-После выполнения всех шагов у вас будет:
-- ✅ Работающий API с базой данных PostgreSQL
-- ✅ Веб-интерфейс с Markdown-редактором
-- ✅ Возможность создавать, редактировать и сохранять заметки
-- ✅ Предпросмотр Markdown в реальном времени
+## Секреты (не коммитить в git)
 
-## 🔍 Проверка работы:
+| Файл | Содержимое |
+|------|------------|
+| `.env` (корень) | Docker Compose |
+| `backend/NotesApp.API/.env` | SMTP |
+| `backend/NotesApp.API/appsettings.Local.json` | Локальные переопределения |
+| `frontend/.env` | `VITE_API_BASE_URL` |
 
-1. **API**: Откройте `https://localhost:7000/swagger` - должен показать Swagger UI
-2. **Frontend**: Откройте `http://localhost:3000` - должен показать интерфейс приложения
-3. **База данных**: В pgAdmin4 проверьте, что создались таблицы: `Users`, `Notes`, `Folders`, `NoteShares`, `Messages`
+Шаблоны: `.env.example`, `appsettings.Local.json.example`, `frontend/.env.example`.
 
-## 🆘 Если что-то не работает:
+---
 
-1. **Ошибка подключения к БД**: Проверьте пароль PostgreSQL
-2. **CORS ошибки**: Убедитесь, что backend запущен на порту 7000
-3. **TypeScript ошибки**: Выполните `npm run build` в папке frontend
-4. **Порт занят**: Измените порты в конфигурации при необходимости
-5. **Ошибка «ConversationReadStates не существует» (500 при открытии чатов):**  
-   Миграция могла не примениться. Выполните вручную SQL-скрипт из `backend/NotesApp.API/Migrations/CreateConversationReadStates_manual.sql` в вашей БД (pgAdmin или `psql -U postgres -d msgs -f backend/NotesApp.API/Migrations/CreateConversationReadStates_manual.sql`), затем перезапустите API.
+## Тесты
+
+### Backend
+
+```bash
+dotnet test backend/NotesApp.API.Tests/NotesApp.API.Tests.csproj
+```
+
+Покрытие: регистрация/логин, заметки, папки, email, сброс паролей, JWT, `.env`.
+
+### Frontend
+
+```bash
+cd frontend
+npm run lint
+npm run test
+npm run build
+```
+
+Vitest + Testing Library: голосовые команды, навигация.
+
+---
+
+## CI (GitHub Actions)
+
+Workflow `.github/workflows/ci.yml` на каждый push/PR в `main`/`master`:
+
+- `dotnet build` + `dotnet test`
+- `npm run lint` + `npm run test` + `npm run build`
+- сборка Docker-образов (без push)
+
+---
+
+## CD: релиз и деплой
+
+### Публикация образов в GHCR
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Workflow `.github/workflows/cd.yml`:
+
+1. Собирает и пушит образы в `ghcr.io/<owner>/notes-app-api` и `notes-app-frontend`
+2. Создаёт GitHub Release
+3. При наличии secrets — деплоит по SSH
+
+### Secrets для автодеплоя (опционально)
+
+| Secret | Описание |
+|--------|----------|
+| `DEPLOY_HOST` | IP или домен сервера |
+| `DEPLOY_USER` | SSH-пользователь |
+| `DEPLOY_SSH_KEY` | Приватный ключ |
+| `DEPLOY_PATH` | Путь к проекту на сервере (например `/opt/notes-app`) |
+
+### Ручной деплой на сервер
+
+```bash
+docker login ghcr.io -u <github-user> -p <github-token-with-read:packages>
+
+export APP_VERSION=v1.0.0
+export GHCR_OWNER=<github-user>
+export POSTGRES_PASSWORD=<strong-password>
+export JWT_SECRET_KEY=<long-random-secret>
+
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+Переменная `VITE_API_BASE_URL` для production-образа фронтенда задаётся при сборке в CD (GitHub variable `VITE_API_BASE_URL` или дефолт).
+
+---
+
+## Устранение неполадок
+
+1. **Ошибка подключения к БД** — проверьте `POSTGRES_PASSWORD` / connection string.
+2. **CORS** — фронтенд должен обращаться к тому же хосту/порту, что указан в `VITE_API_BASE_URL`.
+3. **SMTP / email** — нужен пароль приложения Google, не обычный пароль.
+4. **Порт 5432 занят** — остановите локальный PostgreSQL или измените порт в `docker-compose.yml`.
+5. **ConversationReadStates** — при ошибке 500 в чатах перезапустите API; миграции применятся при старте.

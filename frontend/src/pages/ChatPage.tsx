@@ -170,7 +170,7 @@ export default function ChatPage() {
     try {
       const data = await api.getFriends(token);
       setFriends(data);
-    } catch (error) {
+    } catch {
       // Игнорируем ошибки загрузки друзей
     }
   }, [token]);
@@ -194,7 +194,7 @@ export default function ChatPage() {
     try {
       const data = await api.getNotes(token);
       setNotes(data);
-    } catch (error) {
+    } catch {
       // Игнорируем ошибки
     }
   }, [token]);
@@ -204,7 +204,7 @@ export default function ChatPage() {
     try {
       const data = await api.getFolders(token);
       setFolders(data);
-    } catch (error) {
+    } catch {
       // Игнорируем ошибки
     }
   }, [token]);
@@ -372,11 +372,6 @@ export default function ChatPage() {
     }
   };
 
-  const folderName = (folderId: number | null) => {
-    if (!folderId) return "Без папки";
-    return folders.find((f) => f.id === folderId)?.name ?? "Без папки";
-  };
-
   const getOtherUser = (conversation: Conversation) => {
     return conversation.user1Id === user?.id
       ? conversation.user2Username
@@ -395,7 +390,7 @@ export default function ChatPage() {
     try {
       const data = await api.getNoteComments(token, noteId);
       setComments(data);
-    } catch (error) {
+    } catch {
       // Игнорируем ошибки загрузки комментариев
     }
   }, [token]);
@@ -914,7 +909,7 @@ export default function ChatPage() {
                 ref={notePreviewRef}
                 className="preview"
                 style={{ maxWidth: "100%", wordWrap: "break-word" }}
-                onMouseUp={(e) => {
+                onMouseUp={() => {
                   const selection = window.getSelection();
                   const selectedString = selection?.toString().trim();
                   if (!selection || !selectedString) {

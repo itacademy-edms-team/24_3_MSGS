@@ -154,7 +154,7 @@ export default function ChatPage() {
             const data = await api.getFriends(token);
             setFriends(data);
         }
-        catch (error) {
+        catch {
             // Игнорируем ошибки загрузки друзей
         }
     }, [token]);
@@ -177,7 +177,7 @@ export default function ChatPage() {
             const data = await api.getNotes(token);
             setNotes(data);
         }
-        catch (error) {
+        catch {
             // Игнорируем ошибки
         }
     }, [token]);
@@ -188,7 +188,7 @@ export default function ChatPage() {
             const data = await api.getFolders(token);
             setFolders(data);
         }
-        catch (error) {
+        catch {
             // Игнорируем ошибки
         }
     }, [token]);
@@ -343,11 +343,6 @@ export default function ChatPage() {
             showStatus(error instanceof Error ? error.message : "Ошибка отправки заметки", 6000);
         }
     };
-    const folderName = (folderId) => {
-        if (!folderId)
-            return "Без папки";
-        return folders.find((f) => f.id === folderId)?.name ?? "Без папки";
-    };
     const getOtherUser = (conversation) => {
         return conversation.user1Id === user?.id
             ? conversation.user2Username
@@ -367,7 +362,7 @@ export default function ChatPage() {
             const data = await api.getNoteComments(token, noteId);
             setComments(data);
         }
-        catch (error) {
+        catch {
             // Игнорируем ошибки загрузки комментариев
         }
     }, [token]);
@@ -580,7 +575,7 @@ export default function ChatPage() {
                                                     borderRadius: "6px",
                                                     background: selectedNote.canEdit ? "rgba(5, 150, 105, 0.15)" : "rgba(107, 114, 128, 0.15)",
                                                     color: selectedNote.canEdit ? "#059669" : "#6b7280"
-                                                }, children: selectedNote.canEdit ? "edit" : "read" }), _jsx("button", { type: "button", className: "btn primary", onClick: () => navigate(`/app?noteId=${selectedNote.id}`), style: { fontSize: "0.9rem" }, children: selectedNote.canEdit ? "Редактировать" : "Открыть в заметках" }), _jsxs("button", { type: "button", className: "btn secondary", onClick: () => setShowComments(!showComments), style: { fontSize: "0.9rem" }, children: [showComments ? "Скрыть" : "Показать", " (", comments.length, ")"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { fontSize: "1.5rem", padding: "0.25rem 0.5rem" }, "aria-label": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443", children: "\u00D7" })] })] }), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }, children: [_jsx("div", { ref: notePreviewRef, className: "preview", style: { maxWidth: "100%", wordWrap: "break-word" }, onMouseUp: (e) => {
+                                                }, children: selectedNote.canEdit ? "edit" : "read" }), _jsx("button", { type: "button", className: "btn primary", onClick: () => navigate(`/app?noteId=${selectedNote.id}`), style: { fontSize: "0.9rem" }, children: selectedNote.canEdit ? "Редактировать" : "Открыть в заметках" }), _jsxs("button", { type: "button", className: "btn secondary", onClick: () => setShowComments(!showComments), style: { fontSize: "0.9rem" }, children: [showComments ? "Скрыть" : "Показать", " (", comments.length, ")"] }), _jsx("button", { type: "button", className: "btn ghost", onClick: closeNotePanel, style: { fontSize: "1.5rem", padding: "0.25rem 0.5rem" }, "aria-label": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0437\u0430\u043C\u0435\u0442\u043A\u0443", children: "\u00D7" })] })] }), _jsxs("div", { style: { flex: 1, overflowY: "auto", padding: "1.5rem", position: "relative", maxWidth: "100%" }, children: [_jsx("div", { ref: notePreviewRef, className: "preview", style: { maxWidth: "100%", wordWrap: "break-word" }, onMouseUp: () => {
                                             const selection = window.getSelection();
                                             const selectedString = selection?.toString().trim();
                                             if (!selection || !selectedString) {

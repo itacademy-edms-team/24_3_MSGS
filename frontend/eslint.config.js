@@ -5,6 +5,18 @@ import tseslint from "@typescript-eslint/eslint-plugin";
 import reactPlugin from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const tsconfigRootDir = path.dirname(fileURLToPath(import.meta.url));
+
+const speechApiGlobals = {
+  SpeechRecognition: "readonly",
+  SpeechRecognitionEvent: "readonly",
+  SpeechRecognitionErrorEvent: "readonly",
+  SpeechRecognitionResultList: "readonly",
+  SpeechRecognitionResult: "readonly"
+};
 
 export default [
   js.configs.recommended,
@@ -18,11 +30,13 @@ export default [
         ecmaFeatures: {
           jsx: true
         },
-        projectService: true
+        projectService: true,
+        tsconfigRootDir
       },
       globals: {
         ...globals.browser,
         ...globals.es2021,
+        ...speechApiGlobals,
         JSX: true
       }
     },
@@ -37,6 +51,7 @@ export default [
       ...reactPlugin.configs.recommended.rules,
       ...reactPlugin.configs["jsx-runtime"].rules,
       ...reactHooks.configs.recommended.rules,
+      "react/no-unescaped-entities": "off",
       "react-refresh/only-export-components": [
         "warn",
         {
@@ -49,6 +64,13 @@ export default [
         version: "detect"
       }
     }
+  },
+  {
+    files: ["**/*.d.ts"],
+    rules: {
+      "no-redeclare": "off",
+      "@typescript-eslint/no-redeclare": "off",
+      "no-var": "off"
+    }
   }
 ];
-
